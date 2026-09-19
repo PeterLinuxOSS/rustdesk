@@ -1,0 +1,372 @@
+# ===========================================================================
+# DataSoftware Remote - Windows x86_64 build
+# ===========================================================================
+#
+# Dedicated build for the DataSoftware custom client. It reuses upstream's own
+# reusable workflows for the two prerequisites (flutter-rust-bridge and the
+# RustDeskTempTopMostWindow DLL) and mirrors the Windows x86_64 steps of
+# upstream's `.github/workflows/flutter-build.yml`, with the platforms we do
+# not ship removed.
+#
+# Artifact names deliberately keep the upstream `rustdesk-<version>-<arch>`
+# scheme, because `src/updater.rs` builds its download URL from exactly that
+# pattern. Only the application branding changes, not the file names.
+#
+# Publishing: the release must be a FULL release, not a pre-release, because
+# the updater resolves the latest version through GitHub's `/releases/latest`
+# endpoint, which skips drafts and pre-releases.
+#
+# Versioning: the release tag is the single source of truth. It is written into
+# Cargo.toml before building, so the installed client reports the same version
+# that the tag advertises. Without that, the updater would download the same
+# release again on every check. Use tags of the form `1.4.9-1`, `1.4.9-2`, ...:
+# upstream's `get_version_number()` reads the `-N` suffix as a build number, so
+# `1.4.9-1` compares as newer than the `1.4.9` base release.
+#
+# See DATASOFTWARE_BUILD.md.
+
+name: DataSoftware Remote - Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build, e.g. 1.4.9-1. Defaults to the version in Cargo.toml."
+        type: string
+        required: false
+        default: ""
+      publish-release:
+        description: "Publish the artifacts as a GitHub release (needed by the auto-updater)"
+        type: boolean
+        default: false
+  push:
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+-[0-9]+"
+
+permissions:
+  contents: write
+
+# Values copied from upstream .github/workflows/flutter-build.yml (1.4.9).
+# Keep them in sync when merging a new upstream release.
+env:
+  SCITER_RUST_VERSION: "1.75"
+  LLVM_VERSION: "15.0.6"
+  FLUTTER_VERSION: "3.24.5"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+  VCPKG_COMMIT_ID: "120deac3062162151622ca4860575a33844ba10b"
+
+jobs:
+  generate-bridge:
+    uses: ./.github/workflows/bridge.yml
+
+  build-RustDeskTempTopMostWindow:
+    uses: ./.github/workflows/third-party-RustDeskTempTopMostWindow.yml
+    with:
+      upload-artifact: true
+      target: windows-2022
+      configuration: Release
+      platform: x64
+      target_version: Windows10
+
+  build-windows:
+    name: DataSoftware Remote (windows x86_64)
+    needs: [build-RustDeskTempTopMostWindow, generate-bridge]
+    runs-on: windows-2022
+    env:
+      TARGET: x86_64-pc-windows-msvc
+      ARCH: x86_64
+      FLUTTER_ARCH: x64
+      VCPKG_TRIPLET: x64-windows-static
+      APP_NAME: DataSoftware Remote
+      MANUFACTURER: DataSoftware
+    steps:
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
+
+      - name: Checkout source code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          submodules: recursive
+
+      # >>> DataSoftware <<<
+      # The release tag drives the version so that the built client reports the
+      # same version the updater sees on GitHub.
+      - name: Resolve version
+        shell: bash
+        run: |
+          set -eu
+          if [ "${{ github.event_name }}" = "push" ]; then
+            VERSION="${GITHUB_REF_NAME}"
+          elif [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "Building DataSoftware Remote ${VERSION}"
+
+      # Cargo.toml drives crate::VERSION and Cargo.lock has to follow, because
+      # build.py runs `cargo build --locked`.
+      - name: Pin the build to the release version
+        shell: bash
+        run: python3 .github/datasoftware/set_version.py "${VERSION}"
+      # >>> end DataSoftware <<<
+
+      - name: Restore bridge files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: bridge-artifact
+          path: ./
+
+      - name: Install LLVM and Clang
+        uses: KyleMayes/install-llvm-action@ebc0426251bc40c7cd31162802432c68818ab8f0 # v2.0.9
+        with:
+          version: ${{ env.LLVM_VERSION }}
+
+      - name: Install flutter
+        uses: subosito/flutter-action@2783a3f08e1baf891508463f8c6653c258246225 # v2.12.0
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          architecture: x64
+
+      # https://github.com/flutter/flutter/issues/155685
+      - name: Replace engine with rustdesk custom flutter engine
+        run: |
+          flutter doctor -v
+          flutter precache --windows
+          Invoke-WebRequest -Uri https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip -OutFile windows-x64-release.zip
+          Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release
+          mv -Force windows-x64-release/*  C:/hostedtoolcache/windows/flutter/stable-${{ env.FLUTTER_VERSION }}-x64/bin/cache/artifacts/engine/windows-x64-release/
+
+      - name: Patch flutter
+        shell: bash
+        run: |
+          cp .github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff $(dirname $(dirname $(which flutter)))
+          cd $(dirname $(dirname $(which flutter)))
+          [[ "3.24.5" == ${{env.FLUTTER_VERSION}} ]] && git apply flutter_3.24.4_dropdown_menu_enableFilter.diff
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.SCITER_RUST_VERSION }}
+          targets: ${{ env.TARGET }}
+          components: "rustfmt"
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: windows-2022
+
+      # >>> DataSoftware <<<
+      # Cheap guard rails: they fail in seconds if a later upstream merge breaks
+      # the customisation, instead of after a ~45 minute build.
+      - name: Check the DataSoftware customisation
+        shell: bash
+        run: |
+          set -eu
+          echo "--- the three customisation hooks must be present ---"
+          grep -q "crate::datasoftware::apply_builtin_config();" src/common.rs
+          grep -q "crate::datasoftware::fetch_latest_release_url()" src/common.rs
+          grep -q "pub mod datasoftware;" src/lib.rs
+
+          echo "--- nothing may call the upstream version service any more ---"
+          # hbb_common::version_check_request() is the only way into
+          # api.rustdesk.com/version/latest. An upstream merge that
+          # reintroduces a caller must be reviewed.
+          if grep -rn "version_check_request" src/; then
+            echo "src/ calls version_check_request again, which would query api.rustdesk.com"
+            exit 1
+          fi
+
+          echo "--- the update source must be our fork ---"
+          grep -q 'UPDATE_OWNER: &str = "PeterLinuxOSS"' src/datasoftware.rs
+          grep -q 'UPDATE_REPO: &str = "rustdesk"' src/datasoftware.rs
+          # The asset name the updater builds must still match what this
+          # workflow publishes.
+          grep -q 'rustdesk-{}-{}.{}' src/updater.rs
+      # >>> end DataSoftware <<<
+
+      - name: Setup vcpkg with Github Actions binary cache
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgDirectory: C:\vcpkg
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        env:
+          VCPKG_DEFAULT_HOST_TRIPLET: ${{ env.VCPKG_TRIPLET }}
+        run: |
+          if ! $VCPKG_ROOT/vcpkg \
+            install \
+            --triplet ${{ env.VCPKG_TRIPLET }} \
+            --x-install-root="$VCPKG_ROOT/installed"; then
+            find "${VCPKG_ROOT}/" -name "*.log" | while read -r _1; do
+              echo "$_1:"
+              echo "======"
+              cat "$_1"
+              echo "======"
+              echo ""
+            done
+            exit 1
+          fi
+          head -n 100 "${VCPKG_ROOT}/buildtrees/ffmpeg/build-${{ env.VCPKG_TRIPLET }}-rel-out.log" || true
+        shell: bash
+
+      - name: Build rustdesk
+        run: |
+          # Windows: build RustDesk (DataSoftware Remote)
+          python3 .\build.py --portable --flutter --skip-portable-pack --hwcodec --vram
+          mv ./flutter/build/windows/${{ env.FLUTTER_ARCH }}/runner/Release ./rustdesk
+
+          # Download usbmmidd_v2.zip and extract it to ./rustdesk
+          Invoke-WebRequest -Uri https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip -OutFile usbmmidd_v2.zip
+          Expand-Archive usbmmidd_v2.zip -DestinationPath .
+          Remove-Item -Path usbmmidd_v2\Win32 -Recurse
+          Remove-Item -Path "usbmmidd_v2\deviceinstaller64.exe", "usbmmidd_v2\deviceinstaller.exe", "usbmmidd_v2\usbmmidd.bat"
+          mv -Force .\usbmmidd_v2 ./rustdesk
+
+          # Download printer driver files and extract them to ./rustdesk
+          try {
+            Invoke-WebRequest -Uri https://github.com/rustdesk/hbb_common/releases/download/driver/rustdesk_printer_driver_v4-1.4.zip -OutFile rustdesk_printer_driver_v4-1.4.zip
+            Invoke-WebRequest -Uri https://github.com/rustdesk/hbb_common/releases/download/driver/printer_driver_adapter.zip -OutFile printer_driver_adapter.zip
+            Invoke-WebRequest -Uri https://github.com/rustdesk/hbb_common/releases/download/driver/sha256sums -OutFile sha256sums
+
+            $checksum_driver = (Select-String -Path .\sha256sums -Pattern '^([a-fA-F0-9]{64}) \*rustdesk_printer_driver_v4-1.4\.zip$').Matches.Groups[1].Value
+            $downloadsum_driver = Get-FileHash -Path rustdesk_printer_driver_v4-1.4.zip -Algorithm SHA256
+            $checksum_adapter = (Select-String -Path .\sha256sums -Pattern '^([a-fA-F0-9]{64}) \*printer_driver_adapter\.zip$').Matches.Groups[1].Value
+            $downloadsum_adapter = Get-FileHash -Path printer_driver_adapter.zip -Algorithm SHA256
+            if ($checksum_driver -eq $downloadsum_driver.Hash -and $checksum_adapter -eq $downloadsum_adapter.Hash) {
+                Write-Output "rustdesk_printer_driver_v4-1.4, checksums match, extract the file."
+                Expand-Archive rustdesk_printer_driver_v4-1.4.zip -DestinationPath .
+                mkdir ./rustdesk/drivers
+                mv -Force .\rustdesk_printer_driver_v4-1.4 ./rustdesk/drivers/RustDeskPrinterDriver
+                Expand-Archive printer_driver_adapter.zip -DestinationPath .
+                mv -Force .\printer_driver_adapter.dll ./rustdesk
+            } elseif ($checksum_driver -ne $downloadsum_driver.Hash) {
+                Write-Output "rustdesk_printer_driver_v4-1.4, checksums do not match, ignore the file."
+            } else {
+                Write-Output "printer_driver_adapter.dll, checksums do not match, ignore the file."
+            }
+          } catch {
+              Write-Host "Ingore the printer driver error."
+          }
+
+      # >>> DataSoftware <<<
+      # Same features and profile as build.py above, so this reuses the build
+      # artifacts instead of compiling the dependency tree a second time.
+      - name: Run the DataSoftware unit tests
+        shell: bash
+        run: cargo test --locked --features flutter,hwcodec,vram --lib --release datasoftware::tests
+
+      - name: Verify the DataSoftware branding of the built exe
+        shell: pwsh
+        run: |
+          $info = (Get-Item ./rustdesk/rustdesk.exe).VersionInfo
+          $info | Format-List CompanyName, FileDescription, ProductName, FileVersion
+          if ($info.ProductName -ne "DataSoftware Remote") {
+            Write-Error "ProductName is '$($info.ProductName)', expected 'DataSoftware Remote'"
+            exit 1
+          }
+          if ($info.CompanyName -ne "DataSoftware") {
+            Write-Error "CompanyName is '$($info.CompanyName)', expected 'DataSoftware'"
+            exit 1
+          }
+          $reported = (& ./rustdesk/rustdesk.exe --version) -join ""
+          Write-Host "Reported version: $reported"
+          if ($reported.Trim() -ne "${env:VERSION}") {
+            Write-Error "The built client reports '$reported' but the release is '${env:VERSION}'. The auto-updater would loop."
+            exit 1
+          }
+      # >>> end DataSoftware <<<
+
+      - name: find Runner.res
+        continue-on-error: true
+        shell: bash
+        run: |
+          runner_res=$(find . -name "Runner.res");
+          if [ "$runner_res" == "" ]; then
+            echo "Runner.res: not found";
+          else
+            echo "Runner.res: $runner_res";
+            cp $runner_res ./libs/portable/Runner.res;
+            echo "list ./libs/portable/Runner.res";
+            ls -l ./libs/portable/Runner.res;
+          fi
+
+      - name: Download RustDeskTempTopMostWindow artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: topmostwindow-artifacts-x64
+          path: "./rustdesk"
+
+      - name: Upload unsigned
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: datasoftware-remote-unsigned-windows-${{ env.ARCH }}
+          path: rustdesk
+
+      - name: Build self-extracted executable
+        shell: bash
+        run: |
+          sed -i '/dpiAware/d' res/manifest.xml
+          pushd ./libs/portable
+          pip3 install -r requirements.txt
+          python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
+          popd
+          mkdir -p ./SignOutput
+          mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/rustdesk-${{ env.VERSION }}-${{ env.ARCH }}.exe
+          sha256sum ./SignOutput/rustdesk-*.exe
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2
+
+      # >>> DataSoftware <<<
+      # res/msi expects the main executable to be named "<app name>.exe", both
+      # for reading the version and for the WiX `Name="$(var.Product).exe"`
+      # file reference. Rename after the portable packer, which wraps
+      # rustdesk.exe. The installed application is named after the app name
+      # anyway: src/platform/windows.rs installs to "<app name>.exe".
+      - name: Rename the main exe for the MSI
+        shell: pwsh
+        run: mv ./rustdesk/rustdesk.exe "./rustdesk/${env:APP_NAME}.exe"
+      # >>> end DataSoftware <<<
+
+      - name: Build msi
+        run: |
+          pushd ./res/msi
+          python preprocess.py --arp -d ../../rustdesk `
+            --app-name "${env:APP_NAME}" `
+            -m "${env:MANUFACTURER}" `
+            -v "${env:VERSION}"
+          nuget restore msi.sln
+          msbuild msi.sln -p:Configuration=Release -p:Platform=x64 /p:TargetVersion=Windows10
+          $msi = Get-ChildItem ./Package/bin/*/Release/en-us/Package.msi | Select-Object -First 1
+          mv $msi.FullName ../../SignOutput/rustdesk-${{ env.VERSION }}-${{ env.ARCH }}.msi
+          sha256sum ../../SignOutput/rustdesk-*.msi
+
+      - name: Upload the release artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: datasoftware-remote-windows-${{ env.ARCH }}
+          path: ./SignOutput
+
+      # >>> DataSoftware <<<
+      # prerelease MUST stay false: the updater reads GitHub's
+      # /releases/latest, which skips drafts and pre-releases.
+      - name: Publish Release
+        uses: softprops/action-gh-release@de2c0eb89ae2a093876385947365aca7b0e5f844 # v1
+        if: github.event_name == 'push' || inputs.publish-release
+        with:
+          prerelease: false
+          tag_name: ${{ env.VERSION }}
+          name: DataSoftware Remote ${{ env.VERSION }}
+          files: |
+            ./SignOutput/rustdesk-*.msi
+            ./SignOutput/rustdesk-*.exe
+      # >>> end DataSoftware <<<

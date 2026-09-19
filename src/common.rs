@@ -948,39 +948,25 @@ pub fn check_software_update() {
     }
 }
 
-// No need to check `danger_accept_invalid_cert` for now.
-// Because the url is always `https://api.rustdesk.com/version/latest`.
+// >>> DataSoftware custom client: update source >>>
+// Upstream POSTs to `https://api.rustdesk.com/version/latest`, which answers
+// with a `rustdesk/rustdesk` release URL, and also reports a device
+// fingerprint to that endpoint. Both are replaced here by a direct query
+// against our own GitHub repository (see src/datasoftware.rs). There is no
+// fallback to the official RustDesk update service or repository.
+//
+// Everything after the lookup is upstream code and must stay that way: the
+// returned URL has the same `.../releases/tag/<version>` shape that
+// `src/updater.rs` relies on to build the download URL.
+//
+// When merging a new upstream RustDesk release, re-check this function: if
+// upstream changes the shape of the version response or of the URL it stores
+// in SOFTWARE_UPDATE_URL, this hook has to follow.
 #[tokio::main(flavor = "current_thread")]
 pub async fn do_check_software_update() -> hbb_common::ResultType<()> {
-    let (request, url) =
-        hbb_common::version_check_request(hbb_common::VER_TYPE_RUSTDESK_CLIENT.to_string());
-    let proxy_conf = Config::get_socks();
-    let tls_url = get_url_for_tls(&url, &proxy_conf);
-    let tls_type = get_cached_tls_type(tls_url);
-    let is_tls_not_cached = tls_type.is_none();
-    let tls_type = tls_type.unwrap_or(TlsType::Rustls);
-    let client = create_http_client_async(tls_type, false);
-    let latest_release_response = match client.post(&url).json(&request).send().await {
-        Ok(resp) => {
-            upsert_tls_cache(tls_url, tls_type, false);
-            resp
-        }
-        Err(err) => {
-            if is_tls_not_cached && err.is_request() {
-                let tls_type = TlsType::NativeTls;
-                let client = create_http_client_async(tls_type, false);
-                let resp = client.post(&url).json(&request).send().await?;
-                upsert_tls_cache(tls_url, tls_type, false);
-                resp
-            } else {
-                return Err(err.into());
-            }
-        }
-    };
-    let bytes = latest_release_response.bytes().await?;
-    let resp: hbb_common::VersionCheckResponse = serde_json::from_slice(&bytes)?;
-    let response_url = resp.url;
+    let response_url = crate::datasoftware::fetch_latest_release_url().await?;
     let latest_release_version = response_url.rsplit('/').next().unwrap_or_default();
+    // <<< DataSoftware custom client: update source <<<
 
     if get_version_number(&latest_release_version) > get_version_number(crate::VERSION) {
         #[cfg(feature = "flutter")]
@@ -2081,6 +2067,15 @@ pub fn rustdesk_interval(i: Interval) -> ThrottledInterval {
 }
 
 pub fn load_custom_client() {
+    // >>> DataSoftware custom client >>>
+    // Hooked here rather than at the call sites on purpose: this function is
+    // the single entry point used by every process (core_main, the Windows
+    // service, the Flutter FFI entry and the Windows installer path), so all of
+    // them get the built-in branding and server configuration.
+    // A signed upstream custom.txt, if one is ever shipped next to the exe, is
+    // still read below and still wins, because it is applied afterwards.
+    crate::datasoftware::apply_builtin_config();
+    // <<< DataSoftware custom client <<<
     #[cfg(debug_assertions)]
     if let Ok(data) = std::fs::read_to_string("./custom.txt") {
         read_custom_client(data.trim());

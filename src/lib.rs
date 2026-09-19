@@ -19,6 +19,8 @@ mod rendezvous_mediator;
 pub use self::rendezvous_mediator::*;
 /// cbindgen:ignore
 pub mod common;
+// DataSoftware custom client configuration, see DATASOFTWARE_BUILD.md.
+pub mod datasoftware;
 #[cfg(not(any(target_os = "ios")))]
 pub mod ipc;
 #[cfg(not(any(
