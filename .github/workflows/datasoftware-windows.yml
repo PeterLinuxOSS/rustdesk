@@ -262,7 +262,13 @@ jobs:
       # artifacts instead of compiling the dependency tree a second time.
       - name: Run the DataSoftware unit tests
         shell: bash
-        run: cargo test --locked --features flutter,hwcodec,vram --lib --release datasoftware::tests
+        run: |
+          set -eu
+          cargo test --locked --features flutter,hwcodec,vram --lib --release \
+            datasoftware::tests 2>&1 | tee test-output.txt
+          # A filter that matches nothing still exits 0, so make sure the tests
+          # actually ran.
+          grep -qE "test result: ok\. [1-9][0-9]* passed" test-output.txt
 
       - name: Verify the DataSoftware branding of the built exe
         shell: pwsh

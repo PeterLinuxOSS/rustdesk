@@ -38,9 +38,11 @@ def write(path: Path, text: str) -> None:
 def set_cargo_toml(version: str) -> None:
     path = ROOT / "Cargo.toml"
     text = read(path)
+    # No `$` anchor: a Windows checkout has CRLF line endings, and the stray
+    # \r would sit between the closing quote and the end of the line.
     new_text, n = re.subn(
-        r'^version = "[^"]*"$',
-        'version = "%s"' % version,
+        r'^(version = )"[^"]*"',
+        lambda m: '%s"%s"' % (m.group(1), version),
         text,
         count=1,
         flags=re.MULTILINE,
