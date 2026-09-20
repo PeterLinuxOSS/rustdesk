@@ -25,10 +25,23 @@ use hbb_common::{
 
 use crate::hbbs_http::{create_http_client_async, get_url_for_tls};
 
-/// User-visible application name. Upstream derives a lot from this value:
-/// window title, install directory, Windows service name, config directory
-/// and `is_custom_client()` (which is simply `get_app_name() != "RustDesk"`).
-pub const APP_NAME: &str = "DataSoftware Remote";
+/// Application name. Upstream derives a lot from this value: window title,
+/// install directory, installed executable name, Windows service name, config
+/// directory, the Add/Remove Programs entry, the strings produced by
+/// `src/lang.rs`, and `is_custom_client()` (simply `get_app_name() != "RustDesk"`).
+///
+/// It must NOT contain a space. Upstream builds Windows shell commands with the
+/// name interpolated unquoted - `sc create {app_name} ...`,
+/// `sc stop/delete/start {app_name}`, `taskkill /F /IM {app_name}.exe` in
+/// `src/platform/windows.rs` (17 places), and `res/msi/preprocess.py` runs the
+/// executable through cmd.exe without quoting its path. A space silently splits
+/// the service name and breaks installation. Upstream states the same
+/// constraint in `src/lang.rs`: "app_name only contains alphanumeric and hyphen".
+///
+/// The nicer spaced form "DataSoftware Remote" is used where it is purely
+/// cosmetic and safe: the Windows executable metadata in
+/// `flutter/windows/runner/Runner.rc`.
+pub const APP_NAME: &str = "DataSoftware-Remote";
 
 /// Company website, used for user-visible "about" style information.
 pub const WEBSITE: &str = "https://datasoftware.sk";
@@ -240,6 +253,18 @@ mod tests {
         use hbb_common::get_version_number;
         assert!(get_version_number("1.4.9-1") > get_version_number("1.4.9"));
         assert!(get_version_number("1.4.9-2") > get_version_number("1.4.9-1"));
+    }
+
+    // A space in the app name silently breaks `sc create {app_name} ...` and
+    // `taskkill /F /IM {app_name}.exe` in src/platform/windows.rs, and the
+    // unquoted cmd.exe invocation in res/msi/preprocess.py.
+    #[test]
+    fn app_name_is_safe_for_windows_shell_commands() {
+        assert!(!APP_NAME.contains(' '), "APP_NAME must not contain a space");
+        assert!(
+            APP_NAME.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'),
+            "APP_NAME must be alphanumeric or hyphen only"
+        );
     }
 
     #[test]

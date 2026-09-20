@@ -78,7 +78,10 @@ jobs:
       ARCH: x86_64
       FLUTTER_ARCH: x64
       VCPKG_TRIPLET: x64-windows-static
-      APP_NAME: DataSoftware Remote
+      # Must match src/datasoftware.rs::APP_NAME, and must not contain a space:
+      # upstream interpolates it unquoted into sc/taskkill commands and runs
+      # "<dist>/<app name>.exe" through cmd.exe without quoting the path.
+      APP_NAME: DataSoftware-Remote
       MANUFACTURER: DataSoftware
     steps:
       - name: Export GitHub Actions cache environment variables
@@ -182,6 +185,12 @@ jobs:
             echo "src/ calls version_check_request again, which would query api.rustdesk.com"
             exit 1
           fi
+
+          echo "--- the MSI app name must match the compiled one ---"
+          # res/msi installs the executable as "<app name>.exe" and the runtime
+          # looks for exactly that name, so a drift here produces an MSI that
+          # installs an app the service cannot find.
+          grep -qF "APP_NAME: &str = \"${APP_NAME}\"" src/datasoftware.rs
 
           echo "--- the update source must be our fork ---"
           grep -q 'UPDATE_OWNER: &str = "PeterLinuxOSS"' src/datasoftware.rs

@@ -36,21 +36,36 @@ merge conflict.
 
 ### Branding
 
-- Application display name: **DataSoftware Remote**
+- Application name: **DataSoftware-Remote**
 - Company / website: **DataSoftware**, <https://datasoftware.sk>
 
-The display name is set once, via `config::APP_NAME`. Upstream derives a lot
-from that single value, so most of the branding follows automatically:
+> **The app name must not contain a space.** It is not just a label: upstream
+> interpolates it unquoted into Windows shell commands — `sc create {app_name}`,
+> `sc stop/delete/start {app_name}` and `taskkill /F /IM {app_name}.exe`, 17
+> places in `src/platform/windows.rs` — and `res/msi/preprocess.py` runs
+> `<dist>/<app name>.exe` through cmd.exe without quoting the path. A space
+> splits the service name and breaks installation and the MSI build. Upstream
+> documents the same constraint in `src/lang.rs`: *"app_name only contains
+> alphanumeric and hyphen"*. `src/datasoftware.rs` has a unit test enforcing it,
+> and the build workflow checks that its `APP_NAME` matches the Rust constant.
+>
+> The spaced form **DataSoftware Remote** is therefore used only where it is
+> purely cosmetic and safe: the Windows executable metadata
+> (`ProductName`, `FileDescription`) in `flutter/windows/runner/Runner.rc`, which
+> is what Explorer shows under Properties → Details.
+
+The name is set once, via `config::APP_NAME`. Upstream derives a lot from that
+single value, so most of the branding follows automatically:
 
 - window title (`flutter/windows/runner/main.cpp` reads it from the DLL through
   `get_rustdesk_app_name`),
-- install directory `C:\Program Files\DataSoftware Remote`, installed
-  executable `DataSoftware Remote.exe`, Windows service name and the
+- install directory `C:\Program Files\DataSoftware-Remote`, installed
+  executable `DataSoftware-Remote.exe`, Windows service name and the
   Add/Remove Programs entry (`src/platform/windows.rs`),
-- configuration directory `%APPDATA%\DataSoftware Remote`,
+- configuration directory `%APPDATA%\DataSoftware-Remote`,
 - every translated string: `src/lang.rs` replaces `RustDesk` with the app name
   for custom clients, so e.g. `About RustDesk` renders as
-  `About DataSoftware Remote`,
+  `About DataSoftware-Remote`,
 - `is_custom_client()`, which upstream defines as
   `get_app_name() != "RustDesk"`.
 
@@ -201,7 +216,7 @@ rustdesk-<tag>-<arch>.msi
 ```
 
 So the asset names **must** keep the `rustdesk-` prefix even though the
-installed application is called DataSoftware Remote. The build workflow
+installed application is called DataSoftware-Remote. The build workflow
 produces exactly these names; nothing was renamed, and the updater and the
 workflow agree by construction.
 
@@ -356,19 +371,20 @@ branding and version.
 After installing the produced `.exe` or `.msi`:
 
 1. The window title, Start menu entry and Add/Remove Programs say
-   **DataSoftware Remote**.
-2. Right-click `DataSoftware Remote.exe` → Properties → Details:
-   Product name `DataSoftware Remote`, Company `DataSoftware`.
+   **DataSoftware-Remote**.
+2. Right-click `DataSoftware-Remote.exe` → Properties → Details:
+   Product name `DataSoftware Remote`, Company `DataSoftware` — the spaced
+   form is intentional here; see the note in §1.
 3. Settings → Network: ID server `api.datasoftware.sk`, API server
    `https://remote.datasoftware.sk`, relay empty, key ends with `+bdwMGg=`.
    These fields are enforced and cannot be changed.
 4. The client gets an ID and a remote session works in both directions.
-5. `%APPDATA%\DataSoftware Remote\config\RustDesk2.toml` contains no
+5. `%APPDATA%\DataSoftware-Remote\config\RustDesk2.toml` contains no
    `custom-rendezvous-server` entry — the value comes from the built-in
    override, not from the user's file.
 6. Auto-update: with a newer release published, the service picks it up within
    24 h. To test immediately, install an older build and watch
-   `%APPDATA%\DataSoftware Remote\log\` — the update check runs 30 s after the
+   `%APPDATA%\DataSoftware-Remote\log\` — the update check runs 30 s after the
    service starts.
 7. Confirm in the log, or with a network capture, that the client contacts
    `api.github.com/repos/PeterLinuxOSS/rustdesk` and never
