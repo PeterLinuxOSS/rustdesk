@@ -329,20 +329,17 @@ if rc:
 # 9. Enforced client behaviour
 # --------------------------------------------------------------------------
 if ds:
-    # Match the insert() call, not just the string: the same literal also
-    # appears in a doc comment and in the unit test, so a plain substring
-    # search would still pass after the real setting was changed.
+    # The opposite of what it looks like: we must NOT pin verification-method.
+    # Upstream's default, use-both-passwords, already accepts the permanent
+    # password. Pinning it to use-permanent-password only removes the one-time
+    # password, and that is the only credential a silently installed machine
+    # has until someone opens the UI and our generator runs.
     check(
-        "the permanent password is enforced",
-        re.search(
-            r"OPTION_VERIFICATION_METHOD\.to_owned\(\)\s*,\s*"
-            r'"use-permanent-password"',
-            ds,
-            re.S,
-        )
-        is not None,
-        "with one-time passwords an unattended machine cannot be reached "
-        "unless somebody is sitting in front of it",
+        "verification-method is left at the upstream default",
+        re.search(r"OPTION_VERIFICATION_METHOD\.to_owned\(\)\s*,", ds) is None,
+        "pinning it would strip the one-time password fallback and an MSI "
+        "install where nobody opens the window would have no usable "
+        "credential at all",
     )
     check(
         "the Discovered tab is hidden",

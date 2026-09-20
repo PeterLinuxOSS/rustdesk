@@ -121,17 +121,18 @@ pub fn apply_builtin_config() {
         );
     }
 
-    // Enforced. Unattended access must always use the permanent password that
-    // the client generates on first run (see flutter/lib/datasoftware.dart).
-    // Left on the default, a machine could end up on one-time passwords, and
-    // then nobody can connect to it without someone sitting in front of it.
-    {
-        let mut overwrite = config::OVERWRITE_SETTINGS.write().unwrap();
-        overwrite.insert(
-            keys::OPTION_VERIFICATION_METHOD.to_owned(),
-            "use-permanent-password".to_owned(),
-        );
-    }
+    // `verification-method` is deliberately left at upstream's default.
+    //
+    // The default is `use-both-passwords` (see
+    // hbb_common::password_security::verification_method), under which the
+    // permanent password this client generates already works. Pinning it to
+    // `use-permanent-password` would not enable anything - it would only
+    // switch the one-time password off, and that one-time password is the
+    // safety net: upstream never generates a permanent password on its own,
+    // and ours is created by the Flutter UI on first run. On a machine
+    // installed silently by MSI where nobody ever opens the window, there
+    // would then be no usable credential at all and the machine would be
+    // unreachable.
 
     // Enforced. Hides the "Discovered" tab (LAN discovery) from the peer list.
     // This is a local, not a server, setting.
@@ -305,15 +306,15 @@ mod tests {
         assert!(crate::is_custom_client());
     }
 
-    // Unattended access depends on this: with one-time passwords a machine can
-    // only be reached while somebody is sitting in front of it.
+    // Upstream's default is `use-both-passwords`, which already accepts the
+    // permanent password and keeps the one-time password as a fallback for a
+    // machine whose UI has never run. Overriding it would only remove that
+    // fallback, so assert we leave it alone.
     #[test]
-    fn permanent_password_is_enforced() {
+    fn verification_method_is_left_at_the_upstream_default() {
         apply_builtin_config();
-        assert_eq!(
-            Config::get_option(keys::OPTION_VERIFICATION_METHOD),
-            "use-permanent-password"
-        );
+        assert_eq!(Config::get_option(keys::OPTION_VERIFICATION_METHOD), "");
+        assert!(hbb_common::password_security::permanent_enabled());
     }
 
     #[test]

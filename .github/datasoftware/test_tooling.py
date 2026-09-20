@@ -155,11 +155,12 @@ MUTATIONS = [
         "the password uses a cryptographic RNG",
     ),
     (
-        "one-time passwords are no longer prevented",
+        "verification-method gets pinned, removing the one-time fallback",
         "src/datasoftware.rs",
-        '"use-permanent-password".to_owned(),',
-        '"use-both-passwords".to_owned(),',
-        "the permanent password is enforced",
+        "    // Enforced. Hides the",
+        "    overwrite.insert(keys::OPTION_VERIFICATION_METHOD.to_owned(), x);\n"
+        "    // Enforced. Hides the",
+        "verification-method is left at the upstream default",
     ),
 ]
 
