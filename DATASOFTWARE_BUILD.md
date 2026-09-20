@@ -179,10 +179,33 @@ Properties worth knowing:
 - The alphabet omits `0/O` and `1/l/I`, because this gets read off a screen and
   typed somewhere else.
 
-`disable-change-permanent-password` is **not** set, and cannot be: that flag
-makes `Config::set_permanent_password()` return false, which would block this
-generator too. To lock the password after provisioning, the flag would have to
-be applied conditionally, once the acknowledgement option is set.
+### Locking the password
+
+`disable-change-permanent-password` **is** set, but only after a password has
+been provisioned. It cannot be unconditional: the flag makes
+`Config::set_permanent_password()` return false, so switching it on from the
+start would block this generator too and leave the machine with no permanent
+password and no way to set one.
+
+`apply_builtin_config()` therefore turns it on only when the acknowledgement
+local option is `Y`. Before the first confirmation the lock is off so the
+password can be generated; afterwards it is on. That ordering is also what
+keeps "dismiss the dialog and get a fresh password next start" working.
+
+It is a *local* option, so it is evaluated per process, which is deliberate:
+
+- **The UI** reads its own `LocalConfig`, so `Settings → Security` hides the
+  password control — it already honours this flag upstream — and
+  `set_permanent_password_with_result()` refuses before the IPC to the service
+  is even attempted. That is the only route the customer has.
+- **The service** does not get the flag, which leaves
+  `rustdesk.exe --password <new>` working as an administrative reset. Nothing
+  in the service changes the password on its own.
+
+The key literal is duplicated in `src/datasoftware.rs` (`INITIAL_PASSWORD_ACK`)
+and `flutter/lib/datasoftware.dart` (`kDataSoftwareInitialPasswordAck`). A
+drift would silently disable the lock, so `check_customisation.py` compares
+them.
 
 Dialog strings are translated; Slovak lives in `src/lang/sk.rs`, English in
 `src/lang/en.rs`.
@@ -515,14 +538,17 @@ After installing the produced `.exe` or `.msi`:
 7. On the very first start a dialog shows a 14-character permanent password.
    Confirm it, restart, and check it does not appear again. Then connect from
    another machine using that password.
-8. `%APPDATA%\DataSoftware-Remote\config\RustDesk2.toml` contains no
+8. After confirming, `Settings → Security` no longer offers to change the
+   password. `rustdesk.exe --password <new>` from an elevated prompt still
+   works, which is the intended administrative reset.
+9. `%APPDATA%\DataSoftware-Remote\config\RustDesk2.toml` contains no
    `custom-rendezvous-server` entry — the value comes from the built-in
    override, not from the user's file.
-9. Auto-update: with a newer release published, the service picks it up within
-   24 h. To test immediately, install an older build and watch
-   `%APPDATA%\DataSoftware-Remote\log\` — the update check runs 30 s after the
-   service starts.
-10. Confirm in the log, or with a network capture, that the client contacts
+10. Auto-update: with a newer release published, the service picks it up within
+    24 h. To test immediately, install an older build and watch
+    `%APPDATA%\DataSoftware-Remote\log\` — the update check runs 30 s after the
+    service starts.
+11. Confirm in the log, or with a network capture, that the client contacts
     `api.github.com/repos/PeterLinuxOSS/rustdesk` and never
     `api.rustdesk.com/version/latest`.
 
