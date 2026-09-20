@@ -168,36 +168,11 @@ jobs:
       # >>> DataSoftware <<<
       # Cheap guard rails: they fail in seconds if a later upstream merge breaks
       # the customisation, instead of after a ~45 minute build.
+      # Cheap guard rails, so a broken customisation fails in seconds rather
+      # than 40 minutes into the build. Same script the upstream sync uses.
       - name: Check the DataSoftware customisation
         shell: bash
-        run: |
-          set -eu
-          echo "--- the three customisation hooks must be present ---"
-          grep -q "crate::datasoftware::apply_builtin_config();" src/common.rs
-          grep -q "crate::datasoftware::fetch_latest_release_url()" src/common.rs
-          grep -q "pub mod datasoftware;" src/lib.rs
-
-          echo "--- nothing may call the upstream version service any more ---"
-          # hbb_common::version_check_request() is the only way into
-          # api.rustdesk.com/version/latest. An upstream merge that
-          # reintroduces a caller must be reviewed.
-          if grep -rn "version_check_request" src/; then
-            echo "src/ calls version_check_request again, which would query api.rustdesk.com"
-            exit 1
-          fi
-
-          echo "--- the MSI app name must match the compiled one ---"
-          # res/msi installs the executable as "<app name>.exe" and the runtime
-          # looks for exactly that name, so a drift here produces an MSI that
-          # installs an app the service cannot find.
-          grep -qF "APP_NAME: &str = \"${APP_NAME}\"" src/datasoftware.rs
-
-          echo "--- the update source must be our fork ---"
-          grep -q 'UPDATE_OWNER: &str = "PeterLinuxOSS"' src/datasoftware.rs
-          grep -q 'UPDATE_REPO: &str = "rustdesk"' src/datasoftware.rs
-          # The asset name the updater builds must still match what this
-          # workflow publishes.
-          grep -q 'rustdesk-{}-{}.{}' src/updater.rs
+        run: python3 .github/datasoftware/check_customisation.py
       # >>> end DataSoftware <<<
 
       - name: Setup vcpkg with Github Actions binary cache

@@ -1,0 +1,231 @@
+# ===========================================================================
+# DataSoftware Remote - upstream sync
+# ===========================================================================
+#
+# Watches rustdesk/rustdesk for new stable releases and proposes the merge,
+# without ever landing one that quietly breaks the customisation.
+#
+#   * clean merge + all customisation checks pass -> pushes a branch and opens
+#     a pull request, and optionally runs the Windows build on it,
+#   * anything else -> opens an issue naming the conflicting files, because
+#     guessing at a conflict in src/common.rs is how the auto-updater ends up
+#     pointing back at rustdesk/rustdesk.
+#
+# It never pushes to the DataSoftware branch itself; a human always reviews.
+#
+# See DATASOFTWARE_BUILD.md section 8.
+
+name: DataSoftware Remote - upstream sync
+
+on:
+  schedule:
+    # Mondays, 04:17 UTC. Off the hour to avoid the scheduler's rush.
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      upstream-tag:
+        description: "Upstream tag to merge (e.g. 1.5.0). Empty = newest stable release."
+        type: string
+        required: false
+        default: ""
+      run-build:
+        description: "Run the Windows build on the sync branch"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the DataSoftware branch
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: datasoftware-custom-client
+          # Full history and submodules: the merge needs real merge bases, and
+          # the customisation checks read libs/hbb_common.
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/rustdesk/rustdesk.git || true
+          git fetch --tags --force upstream
+
+      - name: Pick the target release
+        id: target
+        run: |
+          set -euo pipefail
+          requested="${{ inputs.upstream-tag }}"
+          if [ -n "$requested" ]; then
+            tag="$requested"
+          else
+            # Stable releases only: plain X.Y.Z, no pre-release suffixes.
+            tag="$(git tag -l --merged upstream/master \
+                   | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' \
+                   | sort -V | tail -1)"
+          fi
+          if [ -z "$tag" ]; then
+            echo "Could not determine an upstream release tag." >&2
+            exit 1
+          fi
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          if git merge-base --is-ancestor "$tag" HEAD; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+            echo "Already on upstream ${tag}; nothing to do."
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+            echo "Newest upstream release: ${tag}"
+          fi
+
+      - name: Skip if a sync branch is already open
+        id: existing
+        if: steps.target.outputs.already == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branch="upstream-sync/${{ steps.target.outputs.tag }}"
+          echo "branch=${branch}" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+            echo "open=true" >> "$GITHUB_OUTPUT"
+            echo "${branch} already exists; leaving it alone."
+          else
+            echo "open=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Merge upstream
+        id: merge
+        if: steps.target.outputs.already == 'false' && steps.existing.outputs.open == 'false'
+        run: |
+          set -euo pipefail
+          git checkout -b "${{ steps.existing.outputs.branch }}"
+          bash .github/datasoftware/merge_upstream.sh "${{ steps.target.outputs.tag }}"
+
+      - name: Push the sync branch and open a pull request
+        id: pr
+        if: steps.merge.outputs.status == 'merged'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          branch="${{ steps.existing.outputs.branch }}"
+          tag="${{ steps.target.outputs.tag }}"
+          version="${{ steps.merge.outputs.version }}"
+          git push origin "$branch"
+
+          cat > /tmp/pr-body.md <<EOF
+          Merges upstream RustDesk **${tag}** into the DataSoftware client and sets
+          the build version to \`${version}\`.
+
+          Opened automatically by \`.github/workflows/datasoftware-upstream-sync.yml\`.
+
+          ## What the automation already verified
+
+          \`.github/datasoftware/check_customisation.py\` passes, so after the merge:
+
+          - the three hooks are in place (\`pub mod datasoftware;\`, \`apply_builtin_config()\`
+            in \`load_custom_client()\`, \`fetch_latest_release_url()\` in
+            \`do_check_software_update()\`),
+          - nothing calls \`hbb_common::version_check_request\`, so no update check
+            reaches \`api.rustdesk.com\` or \`rustdesk/rustdesk\`,
+          - the update source is still \`PeterLinuxOSS/rustdesk\`,
+          - \`src/updater.rs\` still builds \`rustdesk-<version>-<arch>.<exe|msi>\` asset
+            names and still derives the download URL by replacing \`tag\`,
+          - the \`keys::OPTION_*\` constants still resolve from the crate
+            \`src/datasoftware.rs\` imports them from,
+          - the app name is still shell-safe and matches the build workflow,
+          - \`Cargo.toml\` and \`Cargo.lock\` agree on the version, and it has a numeric
+            build suffix,
+          - the Windows executable metadata is still branded.
+
+          ## What a human still has to do
+
+          - [ ] Read the upstream diff for \`src/common.rs\`, \`src/updater.rs\` and
+                \`src/platform/windows.rs\`. The checks above are pattern matches; they
+                cannot tell you whether upstream changed the *meaning* of the update
+                flow.
+          - [ ] Run the Windows build and confirm it produces both artifacts.
+          - [ ] Install the result on a Windows machine and work through
+                \`DATASOFTWARE_BUILD.md\` section 9.
+          - [ ] Only then tag a release.
+
+          Merging this PR does **not** publish anything. Releases are published by
+          pushing a version tag.
+          EOF
+
+          url="$(gh pr create \
+            --base datasoftware-custom-client \
+            --head "$branch" \
+            --title "Merge upstream RustDesk ${tag} (DataSoftware ${version})" \
+            --body-file /tmp/pr-body.md)"
+          echo "Opened ${url}"
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+
+      - name: Run the Windows build on the sync branch
+        if: steps.merge.outputs.status == 'merged' && inputs.run-build != false
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A PR opened with GITHUB_TOKEN does not trigger other workflows, so
+          # start the build explicitly. It does not publish a release.
+          gh workflow run datasoftware-windows.yml \
+            --ref "${{ steps.existing.outputs.branch }}" || \
+            echo "Could not start the build automatically; run it by hand."
+
+      - name: Report a merge that needs a human
+        if: steps.merge.outputs.status == 'conflict'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${{ steps.target.outputs.tag }}"
+          conflicts="${{ steps.merge.outputs.conflicts }}"
+          title="Upstream RustDesk ${tag} needs a manual merge"
+
+          if gh issue list --state open --search "$title in:title" \
+               --json title --jq '.[].title' | grep -qxF "$title"; then
+            echo "Issue already open."
+            exit 0
+          fi
+
+          cat > /tmp/issue.md <<EOF
+          Upstream released **${tag}** and it does not merge cleanly into
+          \`datasoftware-custom-client\`.
+
+          Needs attention:
+
+          \`\`\`
+          ${conflicts}
+          \`\`\`
+
+          (\`customisation-check-failed\` means the merge itself applied, but
+          \`.github/datasoftware/check_customisation.py\` then failed — run it locally
+          to see which invariant broke and why it matters.)
+
+          Nothing was pushed. To do it by hand:
+
+          \`\`\`bash
+          git fetch upstream --tags
+          git checkout -b upstream-sync/${tag} datasoftware-custom-client
+          bash .github/datasoftware/merge_upstream.sh ${tag}   # shows the same conflicts
+          # resolve, keeping the DataSoftware hooks, then:
+          python3 .github/datasoftware/check_customisation.py
+          \`\`\`
+
+          \`DATASOFTWARE_BUILD.md\` section 8 lists what to re-check, most importantly
+          that \`do_check_software_update()\` still uses
+          \`crate::datasoftware::fetch_latest_release_url()\` and that no update path
+          goes back to \`rustdesk/rustdesk\`.
+          EOF
+
+          gh issue create --title "$title" --body-file /tmp/issue.md

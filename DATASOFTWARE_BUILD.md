@@ -28,7 +28,11 @@ in the tree is untouched upstream code.
 | `flutter/windows/runner/Runner.rc` | Windows executable metadata. |
 | `Cargo.toml`, `Cargo.lock` | Build version (see §5). |
 | `.github/workflows/datasoftware-windows.yml` | Windows x86_64 build and release. New file. |
+| `.github/workflows/datasoftware-upstream-sync.yml` | Weekly upstream merge proposal. New file. |
 | `.github/datasoftware/set_version.py` | Keeps the build version and the release tag in sync. New file. |
+| `.github/datasoftware/check_customisation.py` | Verifies the customisation is intact. New file. |
+| `.github/datasoftware/merge_upstream.sh` | Performs an upstream merge safely. New file. |
+| `.claude/agents/upstream-sync.md` | Claude Code agent for merges that need judgement. New file. |
 
 The hooks in `src/common.rs` are wrapped in
 `// >>> DataSoftware ... <<<` comment markers so they are easy to find in a
@@ -322,15 +326,46 @@ every 24 h, skipped while a session is active).
 
 ## 8. How to merge a new upstream RustDesk release
 
+This is mostly automated. Three pieces do the work:
+
+| Piece | What it does |
+| --- | --- |
+| `.github/datasoftware/check_customisation.py` | Verifies every invariant below that can be checked mechanically. Runs in seconds, needs no toolchain. |
+| `.github/datasoftware/merge_upstream.sh` | Does the merge, auto-resolves the version conflict, runs the checks, and refuses to commit a merge that breaks them. |
+| `.github/workflows/datasoftware-upstream-sync.yml` | Weekly: finds the newest upstream release, runs the merge, and either opens a PR or opens an issue describing the conflicts. Never pushes to the DataSoftware branch. |
+
+There is also a Claude Code agent, `.claude/agents/upstream-sync.md`, for the
+conflicts that need judgement.
+
+### The automated path
+
+The scheduled workflow opens a pull request when a merge is clean. Review it,
+run the Windows build, test on Windows, then merge. You can also start it by
+hand from the Actions tab, optionally naming a specific tag.
+
+### By hand
+
 ```bash
 git remote add upstream https://github.com/rustdesk/rustdesk.git   # once
 git fetch upstream --tags
-git checkout datasoftware-custom-client
-git merge 1.5.0            # or whichever tag you are moving to
-git submodule update --init --recursive
+git checkout -b upstream-sync/1.5.0 datasoftware-custom-client
+bash .github/datasoftware/merge_upstream.sh 1.5.0
 ```
 
-Then check, in this order:
+The script auto-resolves the one conflict that happens on **every** upstream
+release — `Cargo.toml` and `Cargo.lock`, because upstream bumps the version and
+we carry a `-N` build suffix — by taking upstream's files and re-applying our
+version as `<upstream version>-1`. Those are the only lines we change in them.
+Any other conflict is aborted and reported, because guessing at a conflict in
+`src/common.rs` is how the auto-updater ends up pointing back at
+`rustdesk/rustdesk`.
+
+### What the automation cannot do
+
+`check_customisation.py` is pattern matching. It proves the hooks are *present*;
+it cannot prove upstream did not change what the surrounding code *means*. So
+after any merge, read the upstream diff for `src/common.rs`, `src/updater.rs`,
+`src/platform/windows.rs` and `res/msi/preprocess.py`, and check, in this order:
 
 1. **`src/common.rs::do_check_software_update()`** — the most fragile hook. If
    upstream changed how the latest version is discovered, or the shape of the
@@ -343,11 +378,18 @@ Then check, in this order:
    `rustdesk-<version>-<arch>.<exe|msi>` and that
    `update_url.replace("tag", "download")` is still how the download URL is
    built. If the pattern changed, change the workflow to match.
-4. **`hbb_common::config` keys** — `apply_builtin_config()` uses
-   `keys::OPTION_*` constants; a rename shows up as a compile error, a change in
-   which settings map a key belongs to does not. In 1.4.9 these constants live
-   in `libs/hbb_common/src/config.rs`; on later upstream versions they moved to
-   `libs/base/src/config/keys.rs`, so the `use` statement may need adjusting.
+4. **`keys::OPTION_*` constants** — `check_customisation.py` verifies these
+   resolve from the crate `src/datasoftware.rs` imports them from, so a move is
+   caught before the build. It has already happened: in 1.4.9 they live in
+   `libs/hbb_common/src/config.rs`, but on `master` (1.5.0-dev) all of
+   `OPTION_CUSTOM_RENDEZVOUS_SERVER`, `OPTION_API_SERVER`, `OPTION_KEY` and
+   `OPTION_ALLOW_AUTO_UPDATE` moved to `libs/base/src/config/keys.rs`, leaving
+   only "the keys hbb_common itself references" behind. **Merging 1.5.0 will
+   therefore require changing the `use` in `src/datasoftware.rs` from
+   `hbb_common::config::{self, keys, Config}` to import `keys` from `base`
+   instead** — a one-line change. What the check cannot tell you is whether a
+   key moved to a *different settings map*, which would silently change whether
+   a value is enforced; verify that by hand against `KEYS_SETTINGS`.
 5. **`config::APP_NAME` / `is_custom_client()`** — if upstream stops deriving
    custom-client behaviour from the app name, revisit the branding.
 6. **`res/msi/preprocess.py`** — confirm `--app-name` and `-m` still exist and
