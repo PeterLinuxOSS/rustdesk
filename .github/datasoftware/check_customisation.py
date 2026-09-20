@@ -329,15 +329,27 @@ if rc:
 # 9. Enforced client behaviour
 # --------------------------------------------------------------------------
 if ds:
+    # Match the insert() call, not just the string: the same literal also
+    # appears in a doc comment and in the unit test, so a plain substring
+    # search would still pass after the real setting was changed.
     check(
         "the permanent password is enforced",
-        "use-permanent-password" in ds,
+        re.search(
+            r"OPTION_VERIFICATION_METHOD\.to_owned\(\)\s*,\s*"
+            r'"use-permanent-password"',
+            ds,
+            re.S,
+        )
+        is not None,
         "with one-time passwords an unattended machine cannot be reached "
         "unless somebody is sitting in front of it",
     )
     check(
         "the Discovered tab is hidden",
-        "OPTION_DISABLE_DISCOVERY_PANEL" in ds,
+        re.search(
+            r'OPTION_DISABLE_DISCOVERY_PANEL\.to_owned\(\)\s*,\s*"Y"', ds, re.S
+        )
+        is not None,
         "LAN discovery is switched off for this deployment",
     )
 
@@ -363,9 +375,11 @@ check(
     "the hook would not compile otherwise",
 )
 if dart:
+    # Anchor on the assignment: the same text appears in the comment above it,
+    # so a plain substring search passes even after the real call is changed.
     check(
         "the password uses a cryptographic RNG",
-        "Random.secure()" in dart,
+        re.search(r"=\s*Random\.secure\(\)", dart) is not None,
         "the default Random() is predictable and would make every generated "
         "password guessable",
     )

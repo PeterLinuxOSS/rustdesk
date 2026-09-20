@@ -150,8 +150,8 @@ MUTATIONS = [
     (
         "the password generator falls back to a predictable RNG",
         "flutter/lib/datasoftware.dart",
-        "Random.secure()",
-        "Random()",
+        "rng = Random.secure()",
+        "rng = Random()",
         "the password uses a cryptographic RNG",
     ),
     (
