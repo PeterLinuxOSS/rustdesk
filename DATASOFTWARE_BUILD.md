@@ -33,6 +33,12 @@ in the tree is untouched upstream code.
 | `.github/datasoftware/check_customisation.py` | Verifies the customisation is intact. New file. |
 | `.github/datasoftware/merge_upstream.sh` | Performs an upstream merge safely. New file. |
 | `.claude/agents/upstream-sync.md` | Claude Code agent for merges that need judgement. New file. |
+| `.github/datasoftware/generate_icons.py` + `logo-source.png` | Regenerates every icon from the logo. New files. |
+| `flutter/lib/datasoftware.dart` | First-run permanent password. New file. |
+| `flutter/lib/desktop/pages/desktop_home_page.dart` | One hook: shows the first-run password. |
+| `flutter/assets/icon.png`, `res/*.png`, `res/*.ico`, `app_icon.ico` | Branded icons. |
+| `src/lang/sk.rs`, `src/lang/en.rs` | Strings for the password dialog. |
+| `.gitignore` | Two `!` exceptions so the new PNGs are not ignored. |
 
 The hooks in `src/common.rs` are wrapped in
 `// >>> DataSoftware ... <<<` comment markers so they are easy to find in a
@@ -99,6 +105,87 @@ updater or Windows compatibility:
 
 Only the **public** server key is shipped. The RustDesk server private key must
 never be committed to this repository.
+
+### Icons
+
+Every icon comes from the DataSoftware logo, regenerated from one source by:
+
+```bash
+python3 .github/datasoftware/generate_icons.py
+```
+
+The source is `.github/datasoftware/logo-source.png` (512x512, the app icon
+from datasoftware.sk). Replace it and re-run to change the logo. RustDesk reads
+icons from four unrelated places, and all four have to be updated together:
+
+| File | Where it shows |
+| --- | --- |
+| `flutter/assets/icon.png` | In-app logo (`loadIcon()`) **and** the Windows tray: `src/tray.rs::load_icon_from_asset()` reads `data\flutter_assets\assets\icon.png` next to the exe and only falls back to `res/tray-icon.ico` if it is missing |
+| `flutter/windows/runner/resources/app_icon.ico` | The executable, via `Runner.rc` |
+| `res/icon.ico` | Copied into the MSI by `res/msi/preprocess.py`: installer and Add/Remove Programs |
+| `res/tray-icon.ico` | Tray fallback, compiled in by `src/tray.rs` |
+
+`.gitignore` has a repository-wide `*png` rule. `flutter/assets/icon.png` and
+the logo source are new files in this fork, so they needed explicit `!`
+exceptions — without them the branded tray icon silently never ships. The
+`res/*.png` files were already tracked, so the rule never affected them.
+
+### Client behaviour
+
+| Setting | Value | Map |
+| --- | --- | --- |
+| `disable-discovery-panel` | `Y` | `OVERWRITE_LOCAL_SETTINGS` |
+
+Enforced, so the "Discovered" (LAN discovery) tab is gone and the customer
+cannot switch it back on.
+
+**`verification-method` is deliberately left alone.** Upstream's default is
+`use-both-passwords`, under which the permanent password already works
+(`hbb_common::password_security::permanent_enabled()` is true for anything but
+`OnlyUseTemporaryPassword`). Pinning `use-permanent-password` would not enable
+anything — it would only switch off the one-time password, and that is the
+only credential a machine has until the UI runs for the first time. Upstream
+never generates a permanent password on its own, so on a silent MSI install
+where nobody opens the window, pinning it would leave `has_valid_password()`
+false and the machine unreachable. A unit test and a customisation check both
+assert the override stays absent.
+
+---
+
+## 1b. First-run permanent password
+
+RustDesk stores the permanent password **hashed** — that is why the main window
+shows `-` once one is set. The plaintext exists only at the moment it is
+chosen, and upstream never creates one by itself.
+
+`flutter/lib/datasoftware.dart` therefore, on the first start of an *installed*
+client, generates a 14-character password with `Random.secure()`, applies it
+with `mainSetPermanentPasswordWithResult`, and shows it once in a dialog with a
+copy button. Its only hook into upstream code is one call in
+`desktop_home_page.dart`'s `initState`.
+
+Properties worth knowing:
+
+- **Per machine.** One compromised endpoint exposes nothing else. A single
+  shared password baked into the build would have to sit in the binary in
+  readable form for the dialog to display it, and anyone with the installer
+  could extract it.
+- **Never stored in plaintext** and never leaves the machine.
+- **Dismissing without confirming is safe.** The next start generates and shows
+  a *new* password rather than pretending to recover the old one, which is
+  impossible. So the dialog always shows the password actually in effect.
+- The acknowledgement is recorded in the local option
+  `datasoftware-initial-password-acknowledged`.
+- The alphabet omits `0/O` and `1/l/I`, because this gets read off a screen and
+  typed somewhere else.
+
+`disable-change-permanent-password` is **not** set, and cannot be: that flag
+makes `Config::set_permanent_password()` return false, which would block this
+generator too. To lock the password after provisioning, the flag would have to
+be applied conditionally, once the acknowledgement option is set.
+
+Dialog strings are translated; Slovak lives in `src/lang/sk.rs`, English in
+`src/lang/en.rs`.
 
 ---
 
@@ -421,16 +508,23 @@ After installing the produced `.exe` or `.msi`:
    `https://remote.datasoftware.sk`, relay empty, key ends with `+bdwMGg=`.
    These fields are enforced and cannot be changed.
 4. The client gets an ID and a remote session works in both directions.
-5. `%APPDATA%\DataSoftware-Remote\config\RustDesk2.toml` contains no
+5. The window, taskbar, tray and Add/Remove Programs all show the DataSoftware
+   logo, not the RustDesk one. The tray is the one most likely to be missed: it
+   comes from `flutter_assets/assets/icon.png`, not from the `.ico`.
+6. The peer list has no "Discovered" tab, and it cannot be re-enabled.
+7. On the very first start a dialog shows a 14-character permanent password.
+   Confirm it, restart, and check it does not appear again. Then connect from
+   another machine using that password.
+8. `%APPDATA%\DataSoftware-Remote\config\RustDesk2.toml` contains no
    `custom-rendezvous-server` entry — the value comes from the built-in
    override, not from the user's file.
-6. Auto-update: with a newer release published, the service picks it up within
+9. Auto-update: with a newer release published, the service picks it up within
    24 h. To test immediately, install an older build and watch
    `%APPDATA%\DataSoftware-Remote\log\` — the update check runs 30 s after the
    service starts.
-7. Confirm in the log, or with a network capture, that the client contacts
-   `api.github.com/repos/PeterLinuxOSS/rustdesk` and never
-   `api.rustdesk.com/version/latest`.
+10. Confirm in the log, or with a network capture, that the client contacts
+    `api.github.com/repos/PeterLinuxOSS/rustdesk` and never
+    `api.rustdesk.com/version/latest`.
 
 ---
 
