@@ -765,5 +765,9 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("All monitors", "Všetky monitory"),
         ("#{} monitor", "Monitor {}"),
         ("conn-e2ee-unavailable-tip", "Nepodarilo sa overiť koncové šifrovanie.\nVzdialené zariadenie sa možno stále nastavuje. Skúste to znova neskôr.\nAk sa to bude opakovať, server nemusí byť dôveryhodný.\nNapriek tomu pokračovať?"),
+        ("Permanent password for this computer", "Trvalé heslo pre tento počítač"),
+        ("datasoftware_initial_password_tip", "Toto je trvalé heslo pre vzdialený prístup k tomuto počítaču. Zapíšte si ho — po zatvorení tohto okna sa už nedá zobraziť, pretože je uložené iba v zahashovanej podobe."),
+        ("datasoftware_initial_password_warning", "Ak okno zatvoríte bez potvrdenia, pri ďalšom spustení sa vygeneruje nové heslo."),
+        ("I have saved the password", "Heslo som si uložil"),
     ].iter().cloned().collect();
 }

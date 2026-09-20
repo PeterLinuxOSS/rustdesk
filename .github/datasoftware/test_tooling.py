@@ -140,6 +140,27 @@ MUTATIONS = [
         'VALUE "ProductName", "RustDesk"',
         "Runner.rc ProductName is branded",
     ),
+    (
+        "the first-run password hook is dropped",
+        "flutter/lib/desktop/pages/desktop_home_page.dart",
+        "      ensureInitialPermanentPassword();\n",
+        "",
+        "the home page calls ensureInitialPermanentPassword()",
+    ),
+    (
+        "the password generator falls back to a predictable RNG",
+        "flutter/lib/datasoftware.dart",
+        "Random.secure()",
+        "Random()",
+        "the password uses a cryptographic RNG",
+    ),
+    (
+        "one-time passwords are no longer prevented",
+        "src/datasoftware.rs",
+        '"use-permanent-password".to_owned(),',
+        '"use-both-passwords".to_owned(),',
+        "the permanent password is enforced",
+    ),
 ]
 
 

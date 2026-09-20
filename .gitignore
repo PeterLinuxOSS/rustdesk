@@ -56,3 +56,10 @@ vcpkg_installed
 flutter/lib/generated_plugin_registrant.dart
 libsciter.dylib
 flutter/web/
+# >>> DataSoftware custom client >>>
+# The repository-wide "*png" rule above would silently drop these two, and the
+# branded tray / in-app icon would never ship. res/*.png are already tracked so
+# the rule does not affect them, but these two files are new in this fork.
+!flutter/assets/icon.png
+!.github/datasoftware/logo-source.png
+# <<< DataSoftware custom client <<<

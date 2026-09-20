@@ -326,6 +326,88 @@ if rc:
         )
 
 # --------------------------------------------------------------------------
+# 9. Enforced client behaviour
+# --------------------------------------------------------------------------
+if ds:
+    check(
+        "the permanent password is enforced",
+        "use-permanent-password" in ds,
+        "with one-time passwords an unattended machine cannot be reached "
+        "unless somebody is sitting in front of it",
+    )
+    check(
+        "the Discovered tab is hidden",
+        "OPTION_DISABLE_DISCOVERY_PANEL" in ds,
+        "LAN discovery is switched off for this deployment",
+    )
+
+# --------------------------------------------------------------------------
+# 10. The Dart half: first-run permanent password
+# --------------------------------------------------------------------------
+dart = read("flutter/lib/datasoftware.dart")
+home = read("flutter/lib/desktop/pages/desktop_home_page.dart")
+check(
+    "flutter/lib/datasoftware.dart exists",
+    dart is not None,
+    "it generates and displays the per-machine permanent password",
+)
+check(
+    "the home page calls ensureInitialPermanentPassword()",
+    home and "ensureInitialPermanentPassword()" in home,
+    "without the hook no password is ever generated or shown, and the "
+    "machine ends up unreachable",
+)
+check(
+    "the home page imports the DataSoftware module",
+    home and "package:flutter_hbb/datasoftware.dart" in home,
+    "the hook would not compile otherwise",
+)
+if dart:
+    check(
+        "the password uses a cryptographic RNG",
+        "Random.secure()" in dart,
+        "the default Random() is predictable and would make every generated "
+        "password guessable",
+    )
+
+# --------------------------------------------------------------------------
+# 11. Branding assets
+# --------------------------------------------------------------------------
+def png_size(rel):
+    """Read a PNG's dimensions from its IHDR, without needing Pillow."""
+    p = ROOT / rel
+    if not p.exists():
+        return None
+    data = p.read_bytes()[:24]
+    if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+
+
+check(
+    "the logo source is committed",
+    (ROOT / ".github/datasoftware/logo-source.png").exists(),
+    "generate_icons.py regenerates every icon from it",
+)
+check(
+    "flutter/assets/icon.png is present",
+    png_size("flutter/assets/icon.png") is not None,
+    "it is both the in-app logo and, via src/tray.rs, the Windows tray icon; "
+    "upstream does not ship this file, so a merge that removes it silently "
+    "reverts the tray to the RustDesk logo",
+)
+for rel, expected in (
+    ("res/32x32.png", (32, 32)),
+    ("res/64x64.png", (64, 64)),
+    ("res/128x128.png", (128, 128)),
+):
+    check(
+        "%s is %dx%d" % (rel, expected[0], expected[1]),
+        png_size(rel) == expected,
+        "packaging expects this exact size",
+    )
+
+# --------------------------------------------------------------------------
 # Report
 # --------------------------------------------------------------------------
 failed = [r for r in results if not r[0]]

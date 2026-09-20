@@ -279,6 +279,8 @@ pub static ref T: std::collections::HashMap<&'static str, &'static str> =
         ("wayland-soft-keyboard-input-label", "Soft keyboard input"),
         ("wayland-keyboard-input-reset-choice-tip", "Reset keyboard input choice"),
         ("remember-wayland-keyboard-choice-tip", "Don't ask again for this remote computer"),
-        ("conn-e2ee-unavailable-tip", "Could not verify end-to-end encryption.\nThe remote device may still be setting up. Try again later.\nIf this keeps happening, the server may be untrusted.\nContinue anyway?")
+        ("conn-e2ee-unavailable-tip", "Could not verify end-to-end encryption.\nThe remote device may still be setting up. Try again later.\nIf this keeps happening, the server may be untrusted.\nContinue anyway?"),
+        ("datasoftware_initial_password_tip", "This is the permanent password for remote access to this computer. Write it down now: once this dialog is closed it cannot be shown again, because the password is only kept hashed."),
+        ("datasoftware_initial_password_warning", "If you close this dialog without confirming, a new password is generated on the next start."),
     ].iter().cloned().collect();
 }

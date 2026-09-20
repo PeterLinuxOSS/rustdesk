@@ -17,7 +17,7 @@
 
 use hbb_common::{
     bail,
-    config::{self, keys, Config},
+    config::{self, keys, Config, LocalConfig},
     log,
     tls::{get_cached_tls_type, upsert_tls_cache, TlsType},
     ResultType,
@@ -118,6 +118,28 @@ pub fn apply_builtin_config() {
         overwrite.insert(
             keys::OPTION_RELAY_SERVER.to_owned(),
             RELAY_SERVER.to_owned(),
+        );
+    }
+
+    // Enforced. Unattended access must always use the permanent password that
+    // the client generates on first run (see flutter/lib/datasoftware.dart).
+    // Left on the default, a machine could end up on one-time passwords, and
+    // then nobody can connect to it without someone sitting in front of it.
+    {
+        let mut overwrite = config::OVERWRITE_SETTINGS.write().unwrap();
+        overwrite.insert(
+            keys::OPTION_VERIFICATION_METHOD.to_owned(),
+            "use-permanent-password".to_owned(),
+        );
+    }
+
+    // Enforced. Hides the "Discovered" tab (LAN discovery) from the peer list.
+    // This is a local, not a server, setting.
+    {
+        let mut overwrite_local = config::OVERWRITE_LOCAL_SETTINGS.write().unwrap();
+        overwrite_local.insert(
+            keys::OPTION_DISABLE_DISCOVERY_PANEL.to_owned(),
+            "Y".to_owned(),
         );
     }
 
@@ -281,5 +303,25 @@ mod tests {
         assert!(Config::get_bool_option(keys::OPTION_ALLOW_AUTO_UPDATE));
         // A rebranded app name is what makes upstream treat this as a custom client.
         assert!(crate::is_custom_client());
+    }
+
+    // Unattended access depends on this: with one-time passwords a machine can
+    // only be reached while somebody is sitting in front of it.
+    #[test]
+    fn permanent_password_is_enforced() {
+        apply_builtin_config();
+        assert_eq!(
+            Config::get_option(keys::OPTION_VERIFICATION_METHOD),
+            "use-permanent-password"
+        );
+    }
+
+    #[test]
+    fn discovery_panel_is_hidden() {
+        apply_builtin_config();
+        assert_eq!(
+            LocalConfig::get_option(keys::OPTION_DISABLE_DISCOVERY_PANEL),
+            "Y"
+        );
     }
 }
