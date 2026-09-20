@@ -56,6 +56,12 @@ pub const API_SERVER: &str = "https://remote.datasoftware.sk";
 /// relay to use. Do not hard-code a relay here unless the deployment needs one.
 pub const RELAY_SERVER: &str = "";
 
+/// Local option the Flutter side sets once the technician has confirmed they
+/// stored the generated permanent password. Must stay identical to
+/// `kDataSoftwareInitialPasswordAck` in flutter/lib/datasoftware.dart;
+/// `.github/datasoftware/check_customisation.py` asserts that.
+pub const INITIAL_PASSWORD_ACK: &str = "datasoftware-initial-password-acknowledged";
+
 /// Public key of the self-hosted RustDesk server.
 /// This is the PUBLIC half only - it is meant to be shipped inside the client.
 /// The server's private key must never be added to this repository.
@@ -149,6 +155,34 @@ pub fn apply_builtin_config() {
     {
         let mut defaults = config::DEFAULT_SETTINGS.write().unwrap();
         defaults.insert(keys::OPTION_ALLOW_AUTO_UPDATE.to_owned(), "Y".to_owned());
+    }
+
+    // Lock the permanent password against changes from the UI - but only once
+    // one has actually been provisioned.
+    //
+    // This cannot be unconditional. `Config::set_permanent_password()` returns
+    // false while `disable-change-permanent-password` is on, so switching it on
+    // from the start would also block the generator in
+    // flutter/lib/datasoftware.dart, and the machine would end up with no
+    // permanent password and no way to set one.
+    //
+    // The gate is the acknowledgement the Flutter side writes after the
+    // technician confirms the dialog, which is also what keeps "dismiss the
+    // dialog and get a fresh password next start" working.
+    //
+    // Deliberately a *local* option, so it is evaluated per process:
+    //   * the UI reads its own LocalConfig, so `Settings -> Security` hides the
+    //     password control and `set_permanent_password_with_result()` refuses
+    //     before it ever reaches the service,
+    //   * the service does not have it, which leaves `rustdesk.exe --password`
+    //     working as an administrative reset. Nothing else in the service
+    //     changes the password on its own.
+    if LocalConfig::get_option(INITIAL_PASSWORD_ACK) == "Y" {
+        let mut builtin = config::BUILTIN_SETTINGS.write().unwrap();
+        builtin.insert(
+            keys::OPTION_DISABLE_CHANGE_PERMANENT_PASSWORD.to_owned(),
+            "Y".to_owned(),
+        );
     }
 
     log::info!(
@@ -315,6 +349,31 @@ mod tests {
         apply_builtin_config();
         assert_eq!(Config::get_option(keys::OPTION_VERIFICATION_METHOD), "");
         assert!(hbb_common::password_security::permanent_enabled());
+    }
+
+    // The lock and the generator are mutually exclusive: with the lock on,
+    // Config::set_permanent_password() refuses, so it must stay off until a
+    // password has actually been provisioned and acknowledged.
+    #[test]
+    fn password_lock_waits_for_the_acknowledgement() {
+        LocalConfig::set_option(INITIAL_PASSWORD_ACK.to_owned(), "".to_owned());
+        config::BUILTIN_SETTINGS.write().unwrap().clear();
+        apply_builtin_config();
+        assert!(
+            !Config::is_disable_change_permanent_password(),
+            "the lock must be off before the first password is generated"
+        );
+
+        LocalConfig::set_option(INITIAL_PASSWORD_ACK.to_owned(), "Y".to_owned());
+        apply_builtin_config();
+        assert!(
+            Config::is_disable_change_permanent_password(),
+            "the lock must engage once the password has been acknowledged"
+        );
+
+        // Leave no global state behind for the other tests.
+        LocalConfig::set_option(INITIAL_PASSWORD_ACK.to_owned(), "".to_owned());
+        config::BUILTIN_SETTINGS.write().unwrap().clear();
     }
 
     #[test]

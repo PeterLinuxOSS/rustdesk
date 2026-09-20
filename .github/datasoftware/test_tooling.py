@@ -162,6 +162,20 @@ MUTATIONS = [
         "    // Enforced. Hides the",
         "verification-method is left at the upstream default",
     ),
+    (
+        "the password lock becomes unconditional, blocking the generator",
+        "src/datasoftware.rs",
+        'if LocalConfig::get_option(INITIAL_PASSWORD_ACK) == "Y" {',
+        "{",
+        "the permanent-password lock is gated on the acknowledgement",
+    ),
+    (
+        "the Rust and Dart acknowledgement keys drift apart",
+        "flutter/lib/datasoftware.dart",
+        "'datasoftware-initial-password-acknowledged';",
+        "'datasoftware-password-ack';",
+        "Rust and Dart use the same acknowledgement key",
+    ),
 ]
 
 

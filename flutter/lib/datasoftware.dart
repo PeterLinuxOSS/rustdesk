@@ -33,7 +33,12 @@ import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:get/get.dart';
 
 /// Set once the technician confirms they have stored the password, so the
-/// dialog is not shown again. A local option, so it is per installation.
+/// dialog is not shown again.
+///
+/// It also gates the permanent-password lock: `apply_builtin_config()` in
+/// src/datasoftware.rs turns on `disable-change-permanent-password` only when
+/// this is set, because that flag would otherwise block the generator below as
+/// well. Must stay identical to `INITIAL_PASSWORD_ACK` there.
 const String kDataSoftwareInitialPasswordAck =
     'datasoftware-initial-password-acknowledged';
 

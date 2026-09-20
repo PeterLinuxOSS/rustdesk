@@ -381,6 +381,38 @@ if dart:
         "password guessable",
     )
 
+    # Rust and Dart have to agree on this key by hand. If they drift, the lock
+    # never engages (Dart writes a key Rust never reads) and the customer can
+    # change the password, silently.
+    rust_ack = re.search(r'INITIAL_PASSWORD_ACK: &str = "([^"]+)"', ds or "")
+    dart_ack = re.search(
+        r"kDataSoftwareInitialPasswordAck\s*=\s*'([^']+)'", dart
+    )
+    check(
+        "Rust and Dart use the same acknowledgement key",
+        rust_ack and dart_ack and rust_ack.group(1) == dart_ack.group(1),
+        "the key gates both the dialog and the permanent-password lock; a "
+        "mismatch disables the lock without any error (rust=%s, dart=%s)"
+        % (
+            rust_ack.group(1) if rust_ack else None,
+            dart_ack.group(1) if dart_ack else None,
+        ),
+    )
+
+if ds:
+    # Must be conditional. Set unconditionally it would block
+    # Config::set_permanent_password(), which is how the generator works.
+    check(
+        "the permanent-password lock is gated on the acknowledgement",
+        re.search(
+            r"if\s+LocalConfig::get_option\(INITIAL_PASSWORD_ACK\)\s*==\s*\"Y\"",
+            ds,
+        )
+        is not None,
+        "switching disable-change-permanent-password on unconditionally stops "
+        "the client from ever setting a permanent password in the first place",
+    )
+
 # --------------------------------------------------------------------------
 # 11. Branding assets
 # --------------------------------------------------------------------------
