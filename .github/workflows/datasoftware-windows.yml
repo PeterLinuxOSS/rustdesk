@@ -283,12 +283,22 @@ jobs:
             Write-Error "CompanyName is '$($info.CompanyName)', expected 'DataSoftware'"
             exit 1
           }
-          $reported = (& ./rustdesk/rustdesk.exe --version) -join ""
-          Write-Host "Reported version: $reported"
-          if ($reported.Trim() -ne "${env:VERSION}") {
-            Write-Error "The built client reports '$reported' but the release is '${env:VERSION}'. The auto-updater would loop."
+
+      # Check the version the client will report, which is what the updater
+      # compares against the release tag. Read it from the generated
+      # src/version.rs rather than by running the exe: the Flutter runner is a
+      # GUI-subsystem binary that attaches its own console, so its stdout
+      # cannot be captured reliably from a workflow step.
+      - name: Verify the reported version matches the release
+        shell: bash
+        run: |
+          set -eu
+          cat src/version.rs
+          expected="pub const VERSION: &str = \"${VERSION}\";"
+          if ! grep -qF "$expected" src/version.rs; then
+            echo "The built client would not report ${VERSION}; the auto-updater would reinstall the same release forever."
             exit 1
-          }
+          fi
       # >>> end DataSoftware <<<
 
       - name: find Runner.res
