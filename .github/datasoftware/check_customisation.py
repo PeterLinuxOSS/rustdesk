@@ -381,6 +381,25 @@ if dart:
         "password guessable",
     )
 
+    # mainIsInstalled() only says the machine HAS an install, not that this
+    # process is it. Without the executable-name test the portable build
+    # regenerates the password on every run and pushes it to the service.
+    check(
+        "the password generator only runs in the installed instance",
+        "_isInstalledInstance()" in dart
+        and "Platform.resolvedExecutable" in dart,
+        "mainIsInstalled() alone is true for the portable build too, which "
+        "would silently change the machine's permanent password on every run",
+    )
+    # This runs from a post-frame callback at startup; an escape would surface
+    # as an unhandled async error far from its cause.
+    check(
+        "the first-run password path cannot throw into the UI",
+        re.search(r"ensureInitialPermanentPassword\(\)\s*async\s*\{\s*(//[^\n]*\n\s*)*try\s*\{", dart)
+        is not None,
+        "the whole body must be wrapped in try/catch",
+    )
+
     # Rust and Dart have to agree on this key by hand. If they drift, the lock
     # never engages (Dart writes a key Rust never reads) and the customer can
     # change the password, silently.

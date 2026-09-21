@@ -24,6 +24,7 @@
 // The only hook into upstream code is one call in
 // flutter/lib/desktop/pages/desktop_home_page.dart's initState.
 
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
@@ -62,23 +63,49 @@ String generateDataSoftwarePassword() {
 /// Generate, apply and display the permanent password, unless that has already
 /// been done on this machine. Safe to call on every start.
 Future<void> ensureInitialPermanentPassword() async {
-  // Only for a real installation. A portable run is someone testing the
-  // client, and its configuration does not persist.
-  if (!bind.mainIsInstalled()) return;
-  if (bind.mainGetLocalOption(key: kDataSoftwareInitialPasswordAck) == 'Y') {
-    return;
-  }
+  // Never let this path take down the UI. It runs from a post-frame callback
+  // at startup, so anything thrown here would surface as an unhandled async
+  // error far away from its cause.
+  try {
+    if (!_isInstalledInstance()) return;
+    if (bind.mainGetLocalOption(key: kDataSoftwareInitialPasswordAck) == 'Y') {
+      return;
+    }
 
-  final password = generateDataSoftwarePassword();
-  final ok = await bind.mainSetPermanentPasswordWithResult(password: password);
-  if (!ok) {
-    // Happens if changing the permanent password is disabled. Nothing sensible
-    // to show, and no point retrying on every start.
-    debugPrint('DataSoftware: could not set the initial permanent password');
-    return;
-  }
+    final password = generateDataSoftwarePassword();
+    final ok =
+        await bind.mainSetPermanentPasswordWithResult(password: password);
+    if (!ok) {
+      // Happens when changing the permanent password is disabled. Nothing
+      // sensible to show, and no point retrying on every start.
+      debugPrint('DataSoftware: could not set the initial permanent password');
+      return;
+    }
 
-  _showCredentialsDialog(await _waitForId(), password);
+    _showCredentialsDialog(await _waitForId(), password);
+  } catch (e, stack) {
+    debugPrint('DataSoftware: initial password setup failed: $e\n$stack');
+  }
+}
+
+/// True only when *this process* is the installed client.
+///
+/// `mainIsInstalled()` alone is not enough: it merely checks that
+/// `<Program Files>\<app name>\<app name>.exe` exists on disk (see
+/// `platform::windows::is_installed`), so once the machine has been installed
+/// it also returns true for the portable self-extracting build. Without this
+/// second test, every run of the downloaded installer would generate a fresh
+/// password and push it to the service over IPC, silently changing the
+/// machine's permanent password.
+///
+/// The installer copies the binary to `<app name>.exe`, while the portable
+/// payload keeps upstream's `rustdesk.exe`, so the executable name separates
+/// the two without needing a new FFI call.
+bool _isInstalledInstance() {
+  if (!bind.mainIsInstalled()) return false;
+  final exe = Platform.resolvedExecutable.split(RegExp(r'[\\/]')).last;
+  final expected = '${bind.mainGetAppNameSync()}.exe';
+  return exe.toLowerCase() == expected.toLowerCase();
 }
 
 /// On desktop the ID comes from the service over IPC, which may not be up yet
