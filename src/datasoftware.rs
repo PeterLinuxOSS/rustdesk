@@ -68,6 +68,28 @@ pub const INITIAL_PASSWORD_ACK: &str = "datasoftware-initial-password-acknowledg
 pub const PUBLIC_KEY: &str = "7yMWvosWrAbR2iUFsvbyL0YrMx9P839UfShu+bdwMGg=";
 
 // ---------------------------------------------------------------------------
+// Diagnostics
+// ---------------------------------------------------------------------------
+
+/// Appended to the log line when the ID server refuses to register this device.
+///
+/// Upstream collapses ID_EXISTS, TOO_FREQUENT, INVALID_ID_FORMAT, NOT_SUPPORT
+/// and SERVER_ERROR into a single "unknown RegisterPkResponse", which then
+/// repeats every keep-alive and says neither what was refused nor what to do.
+///
+/// A refusal is permanent. The client never regenerates its key pair, so it
+/// retries with the same one indefinitely and cannot recover without someone
+/// acting on the server. See DATASOFTWARE_BUILD.md, "Recovering a device whose
+/// key changed".
+pub const REGISTER_PK_REFUSED_HINT: &str = concat!(
+    "This will not resolve itself: the client keeps the same key pair and keeps ",
+    "retrying with it. NOT_SUPPORT means the server holds a different public key ",
+    "for this ID, usually because this machine's configuration was lost and ",
+    "rebuilt - delete the device in the DataSoftware console and approve it ",
+    "again when it re-enrols."
+);
+
+// ---------------------------------------------------------------------------
 // Update source
 // ---------------------------------------------------------------------------
 // The stock client asks `https://api.rustdesk.com/version/latest`, which

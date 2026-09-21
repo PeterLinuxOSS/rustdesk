@@ -374,9 +374,29 @@ impl RendezvousMediator {
                         #[cfg(target_os = "android")]
                         notify_android_needs_deploy();
                     }
-                    _ => {
-                        log::error!("unknown RegisterPkResponse");
+                    // >>> DataSoftware: make a refused registration diagnosable <<<
+                    //
+                    // Upstream's catch-all logged one "unknown RegisterPkResponse"
+                    // for five different server answers, repeated every keep-alive
+                    // for as long as the refusal lasts. It cost real debugging time,
+                    // because the client cannot work the cause out on its own: it
+                    // never regenerates its key pair, so a refusal is permanent
+                    // until somebody acts on the server.
+                    //
+                    // Logging only. The registration state machine is left exactly
+                    // as upstream has it - in particular `key_confirmed` is not
+                    // touched here, unlike the NOT_DEPLOYED arm above.
+                    Ok(other) => {
+                        log::error!(
+                            "server refused to register this device: {:?}. {}",
+                            other,
+                            crate::datasoftware::REGISTER_PK_REFUSED_HINT
+                        );
                     }
+                    Err(raw) => {
+                        log::error!("unknown RegisterPkResponse result: {}", raw);
+                    }
+                    // <<< DataSoftware
                 }
                 if rpr.keep_alive > 0 {
                     self.keep_alive = rpr.keep_alive * 1000;

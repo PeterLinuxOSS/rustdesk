@@ -176,6 +176,13 @@ MUTATIONS = [
         "'datasoftware-password-ack';",
         "Rust and Dart use the same acknowledgement key",
     ),
+    (
+        "a refused registration stops naming the cause and the fix",
+        "src/rendezvous_mediator.rs",
+        "crate::datasoftware::REGISTER_PK_REFUSED_HINT",
+        '"see the server log"',
+        "a refused RegisterPkResponse names the result",
+    ),
 ]
 
 

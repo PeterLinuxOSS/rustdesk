@@ -366,6 +366,42 @@ if ds:
     )
 
 # --------------------------------------------------------------------------
+# 9b. A refused registration must stay diagnosable
+# --------------------------------------------------------------------------
+# Upstream answered five different server refusals with one "unknown
+# RegisterPkResponse" line. A refusal is permanent - the client never
+# regenerates its key pair - so without a hint there is nothing in the log to
+# act on, and NOT_SUPPORT is exactly what a public-key mismatch looks like on
+# our server. An upstream merge would silently restore the catch-all.
+mediator = read("src/rendezvous_mediator.rs")
+if mediator is not None:
+    check(
+        "a refused RegisterPkResponse names the result",
+        re.search(r"Ok\(other\)\s*=>\s*\{", mediator)
+        and "crate::datasoftware::REGISTER_PK_REFUSED_HINT" in mediator,
+        "otherwise a rejected device only logs 'unknown RegisterPkResponse' "
+        "every keep-alive, naming neither the cause nor the fix",
+    )
+    check(
+        "upstream's uninformative catch-all is gone",
+        not re.search(
+            r'_\s*=>\s*\{\s*log::error!\("unknown RegisterPkResponse"\)',
+            mediator,
+        ),
+        "it swallowed NOT_SUPPORT together with four unrelated results",
+    )
+else:
+    check("src/rendezvous_mediator.rs readable", False, "file missing")
+
+if ds is not None:
+    check(
+        "REGISTER_PK_REFUSED_HINT tells the operator what to do",
+        "REGISTER_PK_REFUSED_HINT" in ds and "delete the device" in ds,
+        "the client cannot recover on its own - the device has to be removed "
+        "in the console and approved again when it re-enrols",
+    )
+
+# --------------------------------------------------------------------------
 # 10. The Dart half: first-run permanent password
 # --------------------------------------------------------------------------
 dart = read("flutter/lib/datasoftware.dart")
