@@ -345,6 +345,72 @@ Two things follow from upstream's code:
 
 ---
 
+## 4b. Installing and updating — which method to use
+
+Windows keeps one uninstall key per product, and `install_me()` and
+`update_me()` in `src/platform/windows.rs` write it differently. That single
+difference is the whole story behind the "The application is installed by
+self-installation method, please uninstall it first" / error 2866 failures.
+
+| registry value | `install_me()` | `update_me()` |
+| --- | --- | --- |
+| `UninstallString` | rewrites it to `"<exe>" --uninstall` | leaves it alone |
+| `WindowsInstaller` | sets it to `0` | leaves it alone |
+| `DisplayVersion`, `Version`, `BuildDate`, `VersionMajor/Minor/Build`, `EstimatedSize` | writes | writes |
+| `%APPDATA%\<app name>\config` | untouched | untouched |
+
+`is_msi_installed()` is exactly `WindowsInstaller == 1`. So a self-install on a
+machine that was installed from the MSI flips that flag to `0`, and the MSI
+registration becomes self-contradictory: msiexec still knows the ProductCode,
+but the named key now claims a self-install. Every later MSI operation on that
+machine fails with 2866.
+
+| what you do | result |
+| --- | --- |
+| MSI over an MSI install | fine — WiX major upgrade, see the `Upgrade` table |
+| EXE **Install** button over an EXE self-install | fine |
+| EXE **Install** button over an MSI install | **breaks it** — the next MSI fails with 2866 |
+| MSI over an EXE self-install | MSI refuses: "please uninstall it first" |
+| auto-update | fine on both |
+
+The auto-updater never calls `install_me()`. `updater.rs::update_new_version()`
+launches `<downloaded>.exe --update`, which reaches `platform::update_me()`:
+stop the service, copy the files, `rename_exe_cmd`, start the service. It writes
+only version metadata, and on a custom client installed from the MSI it also
+mirrors that metadata into the MSI's ProductCode key — see `get_reg_msi_key()`,
+which deliberately requires `is_custom_client()`. Upstream built that path for
+exactly this case, which is why `update_msi` excludes custom clients. **Do not
+"fix" that condition**: it would move us off the path upstream tests.
+
+One trap worth knowing: `is_setup()` is `name.ends_with("install.exe")` and the
+release asset is `rustdesk-<tag>-<arch>.exe`, so double-clicking it does *not*
+install anything — it opens the portable client. The damage only happens if
+somebody then presses Install on a machine that came from the MSI.
+
+**Rule: update with the same installer type you installed with, or let the
+auto-updater do it.**
+
+### Recovering a device whose key changed
+
+The client's key pair lives in `%APPDATA%\<app name>\config\<app name>.toml`.
+Nothing in our install, update or uninstall path removes it — the MSI's
+`RemoveFile` table only drops the Start Menu folder, and its custom actions only
+*read* the config. But if it is lost anyway (Windows reinstalled, profile wiped,
+config cleaned by hand) the device keeps its ID, which is derived from the
+machine, and presents a **new** public key.
+
+The server refuses that. `signal/handler.go` compares the stored PK and returns
+`RegisterPkResponse_NOT_SUPPORT`, logging `PK mismatch for <id>`. The client has
+no arm for that result in this context, logs `unknown RegisterPkResponse` every
+~16 s and never registers. It does not regenerate its key, so it cannot recover
+on its own and no amount of restarting or reinstalling will help.
+
+There is no "reset key" endpoint — `PATCH /api/peers/{id}` accepts only `note`,
+`user`, `tags` and `display_name`. **Delete the device in the console**, let it
+re-enroll and approve it again.
+
+---
+
 ## 5. Versioning — important
 
 `crate::VERSION` is generated from the `version` field of `Cargo.toml`
