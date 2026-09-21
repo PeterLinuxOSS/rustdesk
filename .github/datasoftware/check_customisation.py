@@ -275,12 +275,27 @@ if ds:
             re.fullmatch(r"[A-Za-z0-9-]+", name) is not None,
             "upstream states this constraint in src/lang.rs",
         )
+        wf = read(".github/workflows/datasoftware-windows.yml") or ""
         check(
             "APP_NAME matches the build workflow",
-            ("APP_NAME: %s" % name)
-            in (read(".github/workflows/datasoftware-windows.yml") or ""),
+            ("APP_NAME: %s" % name) in wf,
             "the MSI installs '<app name>.exe' and the runtime looks for "
             "exactly that file name",
+        )
+        # platform::windows::install_me() only XCOPYs the payload folder;
+        # unlike update_me() it never calls rename_exe_cmd(). Everything else
+        # resolves the installed binary through get_install_info() as
+        # "<app name>.exe", so the payload must already carry that name.
+        # Upstream survives shipping rustdesk.exe only because "RustDesk"
+        # differs from it by case alone, which Windows ignores.
+        check(
+            "the payload exe is renamed before packaging",
+            "Name the main exe after the app" in wf
+            and 'generate.py -f ../../rustdesk/ -o . -e "../../rustdesk/${APP_NAME}.exe"'
+            in wf,
+            "shipping rustdesk.exe produces an install with no <app name>.exe: "
+            "is_installed() returns false, shortcuts and the service point at a "
+            "missing binary, and the GUI fights the service for the IPC pipe",
         )
 
 # --------------------------------------------------------------------------

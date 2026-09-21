@@ -166,8 +166,6 @@ jobs:
           prefix-key: windows-2022
 
       # >>> DataSoftware <<<
-      # Cheap guard rails: they fail in seconds if a later upstream merge breaks
-      # the customisation, instead of after a ~45 minute build.
       # Cheap guard rails, so a broken customisation fails in seconds rather
       # than 40 minutes into the build. Same script the upstream sync uses.
       - name: Check the DataSoftware customisation
@@ -305,6 +303,26 @@ jobs:
           name: topmostwindow-artifacts-x64
           path: "./rustdesk"
 
+      # >>> DataSoftware <<<
+      # The main executable MUST be named "<app name>.exe" before anything is
+      # packaged. Everything upstream derives from get_install_info(), which
+      # computes `exe = <install path>\<app name>.exe`, but the installer
+      # (platform::windows::install_me) only XCOPYs the payload folder - unlike
+      # update_me(), it never calls rename_exe_cmd(). Upstream gets away with it
+      # because "RustDesk" and "rustdesk.exe" differ only in case, which Windows
+      # ignores. "DataSoftware-Remote" does not, so shipping rustdesk.exe
+      # produced an install with no DataSoftware-Remote.exe at all: is_installed()
+      # false, broken shortcuts, a service pointing at a missing binary, and the
+      # GUI trying to start its own IPC server against the service's pipe
+      # ("Access is denied. (os error 5)").
+      #
+      # The MSI was unaffected because res/msi already required the renamed file,
+      # which is why it installed correctly while the portable exe did not.
+      - name: Name the main exe after the app
+        shell: pwsh
+        run: mv ./rustdesk/rustdesk.exe "./rustdesk/${env:APP_NAME}.exe"
+      # >>> end DataSoftware <<<
+
       - name: Upload unsigned
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -317,7 +335,7 @@ jobs:
           sed -i '/dpiAware/d' res/manifest.xml
           pushd ./libs/portable
           pip3 install -r requirements.txt
-          python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
+          python3 ./generate.py -f ../../rustdesk/ -o . -e "../../rustdesk/${APP_NAME}.exe"
           popd
           mkdir -p ./SignOutput
           mv ./target/release/rustdesk-portable-packer.exe ./SignOutput/rustdesk-${{ env.VERSION }}-${{ env.ARCH }}.exe
@@ -325,17 +343,6 @@ jobs:
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2
-
-      # >>> DataSoftware <<<
-      # res/msi expects the main executable to be named "<app name>.exe", both
-      # for reading the version and for the WiX `Name="$(var.Product).exe"`
-      # file reference. Rename after the portable packer, which wraps
-      # rustdesk.exe. The installed application is named after the app name
-      # anyway: src/platform/windows.rs installs to "<app name>.exe".
-      - name: Rename the main exe for the MSI
-        shell: pwsh
-        run: mv ./rustdesk/rustdesk.exe "./rustdesk/${env:APP_NAME}.exe"
-      # >>> end DataSoftware <<<
 
       - name: Build msi
         run: |
