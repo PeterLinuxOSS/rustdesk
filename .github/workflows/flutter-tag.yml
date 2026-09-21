@@ -1,13 +1,17 @@
 name: Flutter Tag Build
 
+# >>> DataSoftware custom client >>>
+# The tag trigger is removed on purpose. Its pattern matched the
+# DataSoftware release tags (e.g. 1.4.9-1), and the build it calls
+# publishes with `prerelease: true` to that same tag. The updater
+# resolves versions through GitHub's /releases/latest, which skips
+# pre-releases, so letting this run would silently stop every deployed
+# client from ever updating again.
+# DataSoftware releases are built by datasoftware-windows.yml.
+# Kept dispatchable so it can still be run by hand if ever needed.
+# <<< DataSoftware custom client <<<
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
-      - '[0-9]+.[0-9]+.[0-9]+'
-      - 'v[0-9]+.[0-9]+.[0-9]+-[0-9]+'
-      - '[0-9]+.[0-9]+.[0-9]+-[0-9]+'
 
 jobs:
   run-flutter-tag-build:

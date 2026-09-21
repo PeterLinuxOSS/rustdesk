@@ -1,13 +1,13 @@
 name: Fdroid version file generation
 
+# >>> DataSoftware custom client >>>
+# The tag trigger is removed on purpose: its pattern matches the
+# DataSoftware release tags, and this fork ships Windows only, so the
+# job only ever failed and burned CI minutes on every release.
+# Kept dispatchable so it can still be run by hand if ever needed.
+# <<< DataSoftware custom client <<<
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
-      - '[0-9]+.[0-9]+.[0-9]+'
-      - 'v[0-9]+.[0-9]+.[0-9]+-[0-9]+'
-      - '[0-9]+.[0-9]+.[0-9]+-[0-9]+'
 
 jobs:
   # https://gitlab.com/fdroid/fdroiddata/-/blob/master/metadata/com.carriez.flutter_hbb.yml

@@ -451,6 +451,47 @@ for rel, expected in (
     )
 
 # --------------------------------------------------------------------------
+# 12. Upstream workflows must not fire on their own
+#
+#     flutter-tag.yml is the dangerous one: its tag pattern
+#     ('[0-9]+.[0-9]+.[0-9]+-[0-9]+') matches the DataSoftware release tags,
+#     and the build it calls publishes with `prerelease: true` to that same
+#     tag. Since the updater resolves versions through /releases/latest, which
+#     skips pre-releases, letting it run silently stops every deployed client
+#     from updating. fdroid.yml fires on the same tags, and flutter-nightly.yml
+#     runs on a schedule; both only fail here.
+#
+#     ci.yml, flutter-ci.yml and wf-cliprdr-ci.yml are fine: they only push-
+#     trigger on `master`, which this fork does not build from.
+# --------------------------------------------------------------------------
+for wf, why in (
+    (
+        "flutter-tag.yml",
+        "it would publish a pre-release over the DataSoftware release tag and "
+        "break updates for every deployed client",
+    ),
+    ("fdroid.yml", "it fires on the release tags and only ever fails here"),
+    ("flutter-nightly.yml", "it fails nightly and publishes a tag we do not use"),
+):
+    text = read(".github/workflows/%s" % wf)
+    if text is None:
+        # Upstream removed it; nothing to guard.
+        continue
+    m = re.search(r"^on:\n((?:[ \t].*\n|\n)*)", text, re.M)
+    triggers = m.group(1) if m else ""
+    automatic = [
+        t
+        for t in ("push:", "schedule:", "pull_request:")
+        if re.search(r"^\s+%s" % re.escape(t), triggers, re.M)
+    ]
+    check(
+        "%s does not trigger automatically" % wf,
+        not automatic,
+        "%s -- found %s; re-apply the DataSoftware trigger change"
+        % (why, ", ".join(automatic) if automatic else ""),
+    )
+
+# --------------------------------------------------------------------------
 # Report
 # --------------------------------------------------------------------------
 failed = [r for r in results if not r[0]]

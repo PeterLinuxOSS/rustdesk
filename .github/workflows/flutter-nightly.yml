@@ -1,9 +1,12 @@
 name: Flutter Nightly Build
 
+# >>> DataSoftware custom client >>>
+# The nightly schedule is removed on purpose: it builds every platform
+# with upstream's secrets, fails here every night, and publishes to a
+# `nightly` tag this fork does not use.
+# Kept dispatchable so it can still be run by hand if ever needed.
+# <<< DataSoftware custom client <<<
 on:
-  schedule:
-    # schedule build every night
-    - cron: "0 0 * * *"
   workflow_dispatch:
 
 jobs:

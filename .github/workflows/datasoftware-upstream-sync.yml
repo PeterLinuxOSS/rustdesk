@@ -59,7 +59,11 @@ jobs:
       - name: Fetch upstream
         run: |
           git remote add upstream https://github.com/rustdesk/rustdesk.git || true
-          git fetch --tags --force upstream
+          # --no-recurse-submodules: the checkout leaves submodule fetching on
+          # on-demand, and libs/hbb_common has no `upstream` remote, so the
+          # recursion fails the whole fetch. Only the superproject's tags are
+          # needed here; merge_upstream.sh updates the submodule after merging.
+          git fetch --tags --force --no-recurse-submodules upstream
 
       - name: Pick the target release
         id: target
