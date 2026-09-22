@@ -499,6 +499,29 @@ last (`[ui_flutter]`), where `LocalConfig::get_option` never looks — and the
 first-run dialog then generates a fresh password straight over the adopted
 one. See §1b.
 
+### Running it
+
+`tools/Migrate-ToDataSoftware.ps1` does all of the below in one pass, with a
+transcript, a rollback, and a refusal to remove stock until registration is
+confirmed. In an elevated PowerShell on the target:
+
+```powershell
+$s = "$env:TEMP\mig.ps1"
+iwr -UseBasicParsing https://raw.githubusercontent.com/PeterLinuxOSS/rustdesk/datasoftware-custom-client/tools/Migrate-ToDataSoftware.ps1 -OutFile $s
+& $s
+```
+
+Across many machines, fetch the MSI once onto a share and pass `-MsiPath` so
+each run does not pull 24 MB again.
+
+**There is no way to push this from the server.** `sync.rs` consumes only
+`sysinfo`, `modified_at` and `strategy.config_options` from the heartbeat
+reply - a RustDesk client has no remote-execution channel at all, by design.
+BetterDesk's `POST /api/peers/{id}/exec` does not help either: it dispatches
+over the mesh or CDAP agent transports and answers *device not connected via
+mesh or cdap* for an ordinary RustDesk peer. Someone has to be in a session on
+the machine.
+
 ### Order of operations
 
 1. install this client over the stock remote session (§4b: use the MSI)
