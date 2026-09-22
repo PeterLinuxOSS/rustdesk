@@ -506,10 +506,23 @@ transcript, a rollback, and a refusal to remove stock until registration is
 confirmed. In an elevated PowerShell on the target:
 
 ```powershell
-$s = "$env:TEMP\mig.ps1"
+$s = "$env:WINDIR\Temp\mig.ps1"
 iwr -UseBasicParsing https://raw.githubusercontent.com/PeterLinuxOSS/rustdesk/datasoftware-custom-client/tools/Migrate-ToDataSoftware.ps1 -OutFile $s
-& $s
+powershell -NoProfile -ExecutionPolicy Bypass -File $s
 ```
+
+Two details, both learned from RustDesk's own elevated terminal:
+
+- **`C:\Windows\Temp`, not `$env:TEMP`.** That terminal runs as SYSTEM, whose
+  profile frequently has no `AppData\Local\Temp`, so `$env:TEMP` names a
+  directory that is not there and the download dies with
+  `DirectoryNotFoundException`. The script itself resolves this the same way,
+  see `Get-ScratchDir`.
+- **`-ExecutionPolicy Bypass`,** because a downloaded script will otherwise be
+  refused outright. Passing it on the command line affects only that one
+  process; it changes nothing on the machine. If Group Policy pins the policy
+  even that is ignored, and the script has to be run from a local copy the
+  policy already trusts.
 
 Across many machines, fetch the MSI once onto a share and pass `-MsiPath` so
 each run does not pull 24 MB again.

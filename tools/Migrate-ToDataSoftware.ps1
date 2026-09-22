@@ -160,6 +160,21 @@ function Test-PathSafe {
     catch { return $false }
 }
 
+# A directory that certainly exists and is writable.
+#
+# RustDesk's elevated terminal runs as SYSTEM, and the SYSTEM profile often has
+# no AppData\Local\Temp at all - $env:TEMP then points at a path that is simply
+# not there and the download fails with DirectoryNotFoundException.
+# C:\Windows\Temp always exists.
+function Get-ScratchDir {
+    foreach ($d in @($env:TEMP, (Join-Path $env:WINDIR 'Temp'))) {
+        if ($d -and (Test-PathSafe $d)) { return $d }
+    }
+    $d = Join-Path $env:WINDIR 'Temp'
+    New-Item -ItemType Directory -Path $d -Force | Out-Null
+    return $d
+}
+
 # Every profile that either client has touched.
 #
 # Not just $env:APPDATA: on a workstation the technician often elevates with a
@@ -332,7 +347,7 @@ try {
             if (-not $tag) { throw 'could not resolve the latest release' }
 
             $url = "https://github.com/$Repo/releases/download/$tag/rustdesk-$tag-x86_64.msi"
-            $msi = Join-Path $env:TEMP "datasoftware-remote-$tag.msi"
+            $msi = Join-Path (Get-ScratchDir) "datasoftware-remote-$tag.msi"
             Write-Info "downloading $tag"
             for ($try = 1; $try -le 3; $try++) {
                 try { Invoke-WebRequest -UseBasicParsing $url -OutFile $msi; break }
