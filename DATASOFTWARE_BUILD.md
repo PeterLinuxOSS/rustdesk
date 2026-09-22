@@ -451,10 +451,21 @@ The practical route is the remote session you already have. Run this on the
 target, over the existing stock RustDesk connection:
 
 ```powershell
-$t = (irm https://api.github.com/repos/PeterLinuxOSS/rustdesk/releases/latest).tag_name
-$f = "$env:TEMP\datasoftware-remote.msi"
-iwr "https://github.com/PeterLinuxOSS/rustdesk/releases/download/$t/rustdesk-$t-x86_64.msi" -OutFile $f
-Start-Process msiexec -ArgumentList "/i `"$f`" /qn" -Wait
+# Run from an ELEVATED PowerShell. /qn on a non-elevated shell raises UAC,
+# which appears on the secure desktop - over a remote session that can look
+# like nothing happened at all.
+$ErrorActionPreference = 'Stop'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+$t = (Invoke-RestMethod -UseBasicParsing https://api.github.com/repos/PeterLinuxOSS/rustdesk/releases/latest).tag_name
+$f = "$env:TEMP\datasoftware-remote-$t.msi"
+Invoke-WebRequest -UseBasicParsing "https://github.com/PeterLinuxOSS/rustdesk/releases/download/$t/rustdesk-$t-x86_64.msi" -OutFile $f
+if ((Get-Item $f).Length -lt 10MB) { throw "download is truncated" }
+
+$p = Start-Process msiexec -ArgumentList "/i `"$f`" /qn /norestart /l*v `"$env:TEMP\ds-install.log`"" -Wait -PassThru
+if ($p.ExitCode -ne 0) { throw "msiexec exited $($p.ExitCode) - see $env:TEMP\ds-install.log" }
+
+sc.exe query DataSoftware-Remote   # STATE : 4 RUNNING means it took
 ```
 
 It resolves the current tag first, so it does not need editing for each
