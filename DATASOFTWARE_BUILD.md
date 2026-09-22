@@ -440,6 +440,42 @@ Device Enrollment Requests for approval.
 
 ---
 
+## 4c. Migrating a machine from stock RustDesk
+
+There is **no server-side push**. Stock RustDesk has its updater compiled in,
+pointing at `api.rustdesk.com`; no `config_options`, strategy or telemetry
+command from the console can turn it into this client. The binary has to be
+replaced on the machine.
+
+The practical route is the remote session you already have. Run this on the
+target, over the existing stock RustDesk connection:
+
+```powershell
+$t = (irm https://api.github.com/repos/PeterLinuxOSS/rustdesk/releases/latest).tag_name
+$f = "$env:TEMP\datasoftware-remote.msi"
+iwr "https://github.com/PeterLinuxOSS/rustdesk/releases/download/$t/rustdesk-$t-x86_64.msi" -OutFile $f
+Start-Process msiexec -ArgumentList "/i `"$f`" /qn" -Wait
+```
+
+It resolves the current tag first, so it does not need editing for each
+release. Use the MSI, not the EXE: §4b explains why mixing installer types
+breaks the registration.
+
+Three things to expect:
+
+- **Both clients run side by side.** Different app name, service, install
+  directory and IPC pipes, so nothing collides. Leave the stock client in
+  place until the new one is confirmed registered, then uninstall it — that
+  way there is never a window without access.
+- **The first-run dialog shows the generated password.** Since the migration
+  is done over a remote session, the person reading it is *you*, which is the
+  easiest moment to record it. See §1b.
+- **The device appears on the server by itself** while `ENROLLMENT_MODE=open`.
+  Under `managed` it would wait in Device Enrollment Requests instead.
+
+---
+
+
 ## 5. Versioning — important
 
 `crate::VERSION` is generated from the `version` field of `Cargo.toml`
