@@ -390,24 +390,53 @@ somebody then presses Install on a machine that came from the MSI.
 **Rule: update with the same installer type you installed with, or let the
 auto-updater do it.**
 
-### Recovering a device whose key changed
+### Recovering a device the server refuses to register
 
 The client's key pair lives in `%APPDATA%\<app name>\config\<app name>.toml`.
-Nothing in our install, update or uninstall path removes it — the MSI's
+Nothing in our install, update or uninstall path removes it - the MSI's
 `RemoveFile` table only drops the Start Menu folder, and its custom actions only
 *read* the config. But if it is lost anyway (Windows reinstalled, profile wiped,
 config cleaned by hand) the device keeps its ID, which is derived from the
 machine, and presents a **new** public key.
 
-The server refuses that. `signal/handler.go` compares the stored PK and returns
-`RegisterPkResponse_NOT_SUPPORT`, logging `PK mismatch for <id>`. The client has
-no arm for that result in this context, logs `unknown RegisterPkResponse` every
-~16 s and never registers. It does not regenerate its key, so it cannot recover
-on its own and no amount of restarting or reinstalling will help.
+The client then logs `server refused to register this device: NOT_SUPPORT`
+every ~16 s and never registers. It does not regenerate its key, so restarting
+or reinstalling does not help.
 
-There is no "reset key" endpoint — `PATCH /api/peers/{id}` accepts only `note`,
-`user`, `tags` and `display_name`. **Delete the device in the console**, let it
-re-enroll and approve it again.
+**`NOT_SUPPORT` is overloaded.** `signal/handler.go` returns it for three
+different checks and the client cannot tell them apart:
+
+| server log line | meaning | fix |
+| --- | --- | --- |
+| `Enrollment: queued unknown peer <id> for approval` | normal, managed mode | approve it in Device Enrollment Requests |
+| `Rejected PK registration of deleted peer` | the device was deleted | hard delete, then approve |
+| `PK mismatch for <id>` | stored key differs | hard delete, then approve |
+
+Always read the server log before acting. The first case is by far the most
+common - every freshly installed client starts there - and deleting such a
+device instead of approving it only makes things worse.
+
+**Changing the ID does not help.** The client-driven ID change renames the
+database row and carries the stored public key with it, so a mismatch simply
+follows the device to its new ID. It also needs a live source row, so it fails
+outright once the device has been deleted.
+
+**The console's delete is a soft delete, and that blocks re-enrolment.** A
+soft-deleted peer is refused at `RegisterPk` on purpose - see the
+`GHSA-3v82-3gf8-fxx8` comment in `signal/handler.go`: restoring the row would
+let an attacker overwrite the stored key with their own. There is no "reset
+key" endpoint either; `PATCH /api/peers/{id}` accepts only `note`, `user`,
+`tags` and `display_name`.
+
+So a stuck device needs a **hard** delete, which the console UI does not offer:
+
+```bash
+# on the BetterDesk host; KEY is the server's .api_key from its key directory
+curl -X DELETE -H "X-API-Key: $KEY" "http://127.0.0.1:21114/api/peers/<id>?hard=true"
+```
+
+That removes the stored key, the device re-enrols within ~16 s and appears in
+Device Enrollment Requests for approval.
 
 ---
 

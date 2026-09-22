@@ -82,11 +82,15 @@ pub const PUBLIC_KEY: &str = "7yMWvosWrAbR2iUFsvbyL0YrMx9P839UfShu+bdwMGg=";
 /// acting on the server. See DATASOFTWARE_BUILD.md, "Recovering a device whose
 /// key changed".
 pub const REGISTER_PK_REFUSED_HINT: &str = concat!(
-    "This will not resolve itself: the client keeps the same key pair and keeps ",
-    "retrying with it. NOT_SUPPORT means the server holds a different public key ",
-    "for this ID, usually because this machine's configuration was lost and ",
-    "rebuilt - delete the device in the DataSoftware console and approve it ",
-    "again when it re-enrols."
+    "The server does not say which of its checks failed. On a DataSoftware ",
+    "server NOT_SUPPORT covers three cases, most likely first: the device is ",
+    "waiting in Device Enrollment Requests and only needs approving; it was ",
+    "deleted in the console, which blocks re-registration deliberately; or the ",
+    "server holds a different public key for this ID, usually after this ",
+    "machine's configuration was lost and rebuilt. The last two need the device ",
+    "removed permanently - the console's delete is a soft delete and is not ",
+    "enough. The client never recovers on its own: it keeps the same key pair ",
+    "and retries with it indefinitely."
 );
 
 // ---------------------------------------------------------------------------

@@ -396,9 +396,11 @@ else:
 if ds is not None:
     check(
         "REGISTER_PK_REFUSED_HINT tells the operator what to do",
-        "REGISTER_PK_REFUSED_HINT" in ds and "delete the device" in ds,
-        "the client cannot recover on its own - the device has to be removed "
-        "in the console and approved again when it re-enrols",
+        "REGISTER_PK_REFUSED_HINT" in ds
+        and "Device Enrollment Requests" in ds
+        and "soft delete" in ds,
+        "NOT_SUPPORT also covers a device merely awaiting approval, so the "
+        "message must not send the operator straight to deleting it",
     )
 
 # --------------------------------------------------------------------------
