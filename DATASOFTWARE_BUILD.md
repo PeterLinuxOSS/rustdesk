@@ -176,6 +176,13 @@ Properties worth knowing:
   impossible. So the dialog always shows the password actually in effect.
 - The acknowledgement is recorded in the local option
   `datasoftware-initial-password-acknowledged`.
+
+  It lives in the **`[options]` table** of `<app name>_local.toml`, which is
+  where `LocalConfig::get_option` reads it from. Setting it by appending to
+  the end of that file puts it in whatever table happens to be last
+  (`[ui_flutter]`), where it is silently ignored — and the dialog then
+  generates a fresh password over whatever was there. That matters when
+  adopting an existing identity, see §4c.
 - The alphabet omits `0/O` and `1/l/I`, because this gets read off a screen and
   typed somewhere else.
 
@@ -444,48 +451,72 @@ Device Enrollment Requests for approval.
 
 There is **no server-side push**. Stock RustDesk has its updater compiled in,
 pointing at `api.rustdesk.com`; no `config_options`, strategy or telemetry
-command from the console can turn it into this client. The binary has to be
-replaced on the machine.
+command from the console turns it into this client. The binary has to be
+replaced on the machine, over the remote session already in place.
 
-The practical route is the remote session you already have. Run this on the
-target, over the existing stock RustDesk connection:
+### The trap: both clients derive the same peer ID
 
-```powershell
-# Run from an ELEVATED PowerShell. /qn on a non-elevated shell raises UAC,
-# which appears on the secure desktop - over a remote session that can look
-# like nothing happened at all.
-$ErrorActionPreference = 'Stop'
-[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+The ID comes from the machine, so the freshly installed client computes the
+same one the stock client already uses. The key pair does not come from the
+machine — each client generates its own — so the second one to register is
+refused with `PK mismatch` and stays unreachable for ever.
 
-$t = (Invoke-RestMethod -UseBasicParsing https://api.github.com/repos/PeterLinuxOSS/rustdesk/releases/latest).tag_name
-$f = "$env:TEMP\datasoftware-remote-$t.msi"
-Invoke-WebRequest -UseBasicParsing "https://github.com/PeterLinuxOSS/rustdesk/releases/download/$t/rustdesk-$t-x86_64.msi" -OutFile $f
-if ((Get-Item $f).Length -lt 10MB) { throw "download is truncated" }
+It does not look like a failure. `/api/sysinfo` is a separate HTTPS channel
+that keeps working, so the console shows the new `version` and the device
+appears migrated while the stock client is still the one answering.
 
-$p = Start-Process msiexec -ArgumentList "/i `"$f`" /qn /norestart /l*v `"$env:TEMP\ds-install.log`"" -Wait -PassThru
-if ($p.ExitCode -ne 0) { throw "msiexec exited $($p.ExitCode) - see $env:TEMP\ds-install.log" }
+### The fix: adopt the identity instead of creating a new one
 
-sc.exe query DataSoftware-Remote   # STATE : 4 RUNNING means it took
+Config values are encrypted with a key derived from the **machine** uid, not
+from the application name — `hbb_common::password_security::symmetric_crypt()`
+calls `get_uuid()`. So the stock client's stored blobs decrypt correctly in
+this client on the same machine, and its identity can simply be copied across:
+
+```
+%APPDATA%\RustDesk\config\RustDesk.toml   ->   ...\DataSoftware-Remote.toml
 ```
 
-It resolves the current tag first, so it does not need editing for each
-release. Use the MSI, not the EXE: §4b explains why mixing installer types
-breaks the registration.
+That file holds `enc_id`, `key_pair`, `password`, `salt` and `key_confirmed` —
+the whole identity. Do the same for the service profile under
+`%WINDIR%\ServiceProfiles\LocalService`, with the service stopped.
 
-Three things to expect:
+The server then sees the same ID presenting the public key it already has:
+no mismatch, no re-approval, and **no interruption** — verified on a live
+machine, where the peer's `uptime` ran unbroken through both the adoption and
+the removal of the stock client. The permanent password carries over too, so
+nothing has to be handed out again.
 
-- **Both clients run side by side.** Different app name, service, install
-  directory and IPC pipes, so nothing collides. Leave the stock client in
-  place until the new one is confirmed registered, then uninstall it — that
-  way there is never a window without access.
-- **The first-run dialog shows the generated password.** Since the migration
-  is done over a remote session, the person reading it is *you*, which is the
-  easiest moment to record it. See §1b.
-- **The device appears on the server by itself** while `ENROLLMENT_MODE=open`.
-  Under `managed` it would wait in Device Enrollment Requests instead.
+**Set the acknowledgement flag in the same pass.** It belongs in the
+`[options]` table of `<app>_local.toml`:
+
+```toml
+[options]
+datasoftware-initial-password-acknowledged = 'Y'
+```
+
+Appending it to the end of the file puts it in whatever table happens to be
+last (`[ui_flutter]`), where `LocalConfig::get_option` never looks — and the
+first-run dialog then generates a fresh password straight over the adopted
+one. See §1b.
+
+### Order of operations
+
+1. install this client over the stock remote session (§4b: use the MSI)
+2. stop the service, adopt the identity, set the flag, start the service
+3. **check the server**, not the client: `key_confirmed` is worthless here
+   because it was copied in. Look for `in_memory: true` on
+   `/api/peers/{id}/status` and no `PK mismatch` in the signal log.
+4. only then uninstall stock RustDesk
+
+Step 3 is not ceremony. Uninstalling stock on a machine whose new client is
+not registered removes the only way back in.
+
+If a local guard is wanted for step 4, judge the client log by the timestamp
+on each line and open it with `FileShare::ReadWrite` — the running service
+holds it open, and filtering by the file's modified time matches refusals from
+hours ago and blocks a machine that is perfectly healthy.
 
 ---
-
 
 ## 5. Versioning — important
 
