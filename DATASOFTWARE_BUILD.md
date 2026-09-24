@@ -397,6 +397,50 @@ somebody then presses Install on a machine that came from the MSI.
 **Rule: update with the same installer type you installed with, or let the
 auto-updater do it.**
 
+### When an update does not take
+
+Seen on a Windows Server. The first update replaced most files, but the
+restarted service still reported the previous version, saw the release as new
+and relaunched the update - about once a minute, three times - until a service
+start exceeded the 30 s SCM limit. With no recovery actions configured, the
+service then stayed down for two days.
+
+Why it happened, from `update_me()` in `src/platform/windows.rs`:
+
+- `sc stop` only *asks* the service to stop and returns at once.
+- The `XCOPY` right after it runs with **`/C`**, which skips any file it cannot
+  open instead of failing. A service that is still stopping holds
+  `librustdesk.dll`, the file that carries `crate::VERSION`.
+- The batch has no error checking between steps and deletes its "undone"
+  marker unconditionally, so `run_cmds` reports success either way.
+- `XCOPY` keeps the **source** timestamps. The files in Program Files carry the
+  time the payload was unpacked, not the time they were written, so file dates
+  cannot tell you whether the copy took. The version the client reports to the
+  server can: the BetterDesk audit log (`sysinfo_updated ... version:`) showed
+  the old version at each of the extra rounds.
+
+Two independent guards, both in our module with one-line hooks:
+
+- **Wait for the service before copying.** `update_me()` now blocks on
+  `WaitForStatus('Stopped')` for at most a minute before `XCOPY`
+  (`datasoftware::wait_for_service_stop_cmd`). PowerShell rather than parsing
+  `sc query`, because that output is localised.
+- **Do not relaunch the same update within the hour.** `check_update()` records
+  each launched version (`datasoftware-last-update-attempt`) and skips a repeat
+  of the same one for `UPDATE_RETRY_AFTER_SECS`. Still being on the old version
+  after launching it means it did not take; retrying every 30 s after each
+  service start is what made the outage. A check started by hand ignores this.
+
+And on the machine: **set recovery actions.** `tools/Migrate-ToDataSoftware.ps1`
+does it for every machine it migrates; for one installed another way:
+
+```
+sc.exe failure DataSoftware-Remote reset= 86400 actions= restart/60000/restart/60000/restart/60000
+```
+
+Do not reach for `ServicesPipeTimeout` instead - it is machine-wide, needs a
+reboot, and treats the symptom.
+
 ### Recovering a device the server refuses to register
 
 The client's key pair lives in `%APPDATA%\<app name>\config\<app name>.toml`.

@@ -134,6 +134,20 @@ fn check_update(manually: bool) -> ResultType<()> {
     } else {
         let download_url = update_url.replace("tag", "download");
         let version = download_url.split('/').last().unwrap_or_default();
+        // >>> DataSoftware: never relaunch the same update in a tight loop <<<
+        // We are still running the old version, so if this exact update was
+        // launched recently it did not take. See datasoftware.rs, "Updater
+        // safety" - retrying on every service start is what turned one failed
+        // file copy into a service that stayed down for two days.
+        if !manually && crate::datasoftware::update_recently_attempted(version) {
+            log::warn!(
+                "Update to {} was launched less than {} s ago and did not take; not retrying yet",
+                version,
+                crate::datasoftware::UPDATE_RETRY_AFTER_SECS
+            );
+            return Ok(());
+        }
+        // <<< DataSoftware
         #[cfg(target_os = "windows")]
         let download_url = if cfg!(feature = "flutter") {
             let Some(arch) = crate::platform::windows::release_arch_suffix() else {
@@ -196,6 +210,10 @@ fn check_update(manually: bool) -> ResultType<()> {
         // No need to care about the downloaded file here, because it's rare case that the `conns` are empty
         // before the download, but not empty after the download.
         if has_no_active_conns() {
+            // >>> DataSoftware: remembered by the loop guard above <<<
+            #[cfg(target_os = "windows")]
+            crate::datasoftware::record_update_attempt(version);
+            // <<< DataSoftware
             #[cfg(target_os = "windows")]
             update_new_version(update_msi, &version, &file_path);
         }

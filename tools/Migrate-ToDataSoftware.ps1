@@ -413,6 +413,14 @@ try {
 
     # ---- 4. restart ------------------------------------------------------
     Write-Step 'Starting the client'
+
+    # Restart the service by itself if it ever dies or fails to start. The
+    # installer sets no recovery actions, and on one server a single start
+    # that exceeded the 30 s SCM limit left it stopped for two days.
+    & sc.exe failure $AppName reset= 86400 actions= restart/60000/restart/60000/restart/60000 | Out-Null
+    if ($LASTEXITCODE -eq 0) { Write-Ok 'recovery actions set (restart after 60 s, three times a day)' }
+    else { Write-Warn "could not set recovery actions (sc exit $LASTEXITCODE)" }
+
     $restartedAt = Get-Date
     if (-not (Start-Client)) { throw 'the service did not reach Running' }
     Write-Ok 'service running'

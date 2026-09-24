@@ -404,6 +404,49 @@ if ds is not None:
     )
 
 # --------------------------------------------------------------------------
+# 9c. An update that does not take must not loop
+# --------------------------------------------------------------------------
+# Seen on a Windows Server. `sc stop` returns before the service has exited, the
+# XCOPY in update_me() runs with /C and silently skipped the librustdesk.dll the
+# service still held, so the restarted service ran the old crate::VERSION, saw
+# the release as new and relaunched the update - once a minute, three times,
+# until a start timed out and the service stayed down for two days.
+# Two independent fixes; an upstream merge would quietly drop either.
+updater_src = read("src/updater.rs")
+if updater_src is not None:
+    check(
+        "a launched update is not relaunched in a tight loop",
+        re.search(r"if\s+!manually\s*&&\s*crate::datasoftware::update_recently_attempted\(version\)", updater_src)
+        and "crate::datasoftware::record_update_attempt(version)" in updater_src,
+        "an update that does not take would be relaunched on every service "
+        "start, about once a minute",
+    )
+else:
+    check("src/updater.rs readable", False, "file missing")
+
+windows_src = read("src/platform/windows.rs")
+if windows_src is not None:
+    check(
+        "update_me waits for the service to exit before copying",
+        re.search(
+            r"taskkill /F /IM \{app_name\}\.exe\{filter\}\s*\n\{wait_stopped_cmd\}\s*\n\{reg_cmd\}",
+            windows_src,
+        ),
+        "XCOPY /C then silently skips librustdesk.dll while the stopping "
+        "service still holds it, which is what started the loop",
+    )
+else:
+    check("src/platform/windows.rs readable", False, "file missing")
+
+if ds is not None:
+    check(
+        "the service wait is bounded and ignores localised output",
+        "WaitForStatus('Stopped','00:01:00')" in ds and "fn wait_for_service_stop_cmd" in ds,
+        "an unbounded wait can hang an update; parsing sc output breaks on "
+        "Czech and Slovak Windows",
+    )
+
+# --------------------------------------------------------------------------
 # 10. The Dart half: first-run permanent password
 # --------------------------------------------------------------------------
 dart = read("flutter/lib/datasoftware.dart")

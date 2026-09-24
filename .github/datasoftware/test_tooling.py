@@ -183,6 +183,27 @@ MUTATIONS = [
         '"see the server log"',
         "a refused RegisterPkResponse names the result",
     ),
+    (
+        "an update that did not take is relaunched on every start",
+        "src/updater.rs",
+        "crate::datasoftware::update_recently_attempted(version)",
+        "false",
+        "a launched update is not relaunched in a tight loop",
+    ),
+    (
+        "the updater copies files while the service is still running",
+        "src/platform/windows.rs",
+        "{wait_stopped_cmd}",
+        "",
+        "update_me waits for the service to exit before copying",
+    ),
+    (
+        "the wait for the service becomes unbounded",
+        "src/datasoftware.rs",
+        "WaitForStatus('Stopped','00:01:00')",
+        "WaitForStatus('Stopped')",
+        "the service wait is bounded and ignores localised output",
+    ),
 ]
 
 

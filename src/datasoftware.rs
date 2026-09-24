@@ -300,9 +300,127 @@ pub async fn fetch_latest_release_url() -> ResultType<String> {
     Ok(release_tag_url(tag))
 }
 
+// ---------------------------------------------------------------------------
+// Updater safety
+// ---------------------------------------------------------------------------
+// Seen on a Windows Server: an update replaced the files on disk but the
+// restarted service still ran the previous librustdesk.dll, so it saw the
+// release as new again and relaunched the update - about once a minute, three
+// times, until a service start exceeded the 30 s SCM limit and the service
+// stayed down for two days. Two independent fixes, below.
+
+/// Batch lines that block until `service` reports Stopped, for at most a
+/// minute, and then give the kernel a moment to release the handles of the
+/// processes that were just killed.
+///
+/// Needed because `sc stop` only asks: it returns before the service has
+/// exited, and the XCOPY that follows it in `update_me()` runs with `/C`, which
+/// silently skips any file it cannot open instead of failing. A still-running
+/// service holds librustdesk.dll - the file that carries crate::VERSION - so it
+/// was the one left behind.
+///
+/// PowerShell rather than `sc query | find "STOPPED"` because `sc` output is
+/// localised and part of the fleet runs Czech and Slovak Windows; the service
+/// controller API is not. The wait is bounded, so a service that never stops
+/// costs a minute and the batch then carries on exactly as it always did.
+/// `ping` is the sleep because `timeout` refuses to run without a console,
+/// which this batch does not have.
+#[cfg(windows)]
+pub fn wait_for_service_stop_cmd(service: &str) -> String {
+    format!(
+        "powershell -NoProfile -NonInteractive -Command \"(Get-Service -Name '{service}' -ErrorAction SilentlyContinue).WaitForStatus('Stopped','00:01:00')\"\nping -n 3 127.0.0.1 >nul"
+    )
+}
+
+/// Local option recording the last update this client launched, as
+/// `<version>@<unix seconds>`.
+const LAST_UPDATE_ATTEMPT: &str = "datasoftware-last-update-attempt";
+
+/// How long to wait before launching the same update again.
+///
+/// A launched update restarts the service, and the updater checks again 30 s
+/// after every start, so an update that does not take loops with a period of
+/// about a minute. An hour makes a stuck update harmless while still retrying a
+/// transient failure the same day. A check the user starts by hand ignores it.
+pub const UPDATE_RETRY_AFTER_SECS: u64 = 60 * 60;
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// True if an update to `version` was launched less than
+/// [`UPDATE_RETRY_AFTER_SECS`] ago - which, since we are still running the old
+/// version, means it did not take.
+pub fn update_recently_attempted(version: &str) -> bool {
+    recently_attempted(&LocalConfig::get_option(LAST_UPDATE_ATTEMPT), version, unix_now())
+}
+
+/// Call immediately before launching an update to `version`.
+pub fn record_update_attempt(version: &str) {
+    LocalConfig::set_option(
+        LAST_UPDATE_ATTEMPT.to_owned(),
+        format!("{}@{}", version, unix_now()),
+    );
+}
+
+fn recently_attempted(stored: &str, version: &str, now: u64) -> bool {
+    let Some((ver, ts)) = stored.rsplit_once('@') else {
+        return false;
+    };
+    let Ok(ts) = ts.parse::<u64>() else {
+        return false;
+    };
+    // A timestamp in the future means the clock moved. Do not let that hold
+    // updates back for however far it jumped.
+    if ts > now {
+        return false;
+    }
+    ver == version && now - ts < UPDATE_RETRY_AFTER_SECS
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_launched_update_is_not_retried_within_the_hour() {
+        let now = 10_000_000;
+        let v = "1.4.9-5";
+        assert!(!recently_attempted("", v, now), "never attempted");
+        assert!(recently_attempted(&format!("{v}@{}", now - 60), v, now), "one loop period later");
+        assert!(
+            recently_attempted(&format!("{v}@{}", now - UPDATE_RETRY_AFTER_SECS + 1), v, now),
+            "just inside the hour"
+        );
+        assert!(
+            !recently_attempted(&format!("{v}@{}", now - UPDATE_RETRY_AFTER_SECS), v, now),
+            "an hour on, retry"
+        );
+    }
+
+    #[test]
+    fn the_retry_guard_never_holds_back_a_different_or_unreadable_record() {
+        let now = 10_000_000;
+        let v = "1.4.9-5";
+        assert!(!recently_attempted(&format!("1.4.9-4@{}", now - 60), v, now), "older version");
+        assert!(!recently_attempted(&format!("1.4.9-6@{}", now - 60), v, now), "newer version");
+        assert!(!recently_attempted("garbage", v, now));
+        assert!(!recently_attempted(&format!("{v}@notanumber"), v, now));
+        assert!(!recently_attempted(&format!("{v}@{}", now + 3600), v, now), "clock went back");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn waiting_for_the_service_is_bounded_and_does_not_parse_localised_output() {
+        let c = wait_for_service_stop_cmd("DataSoftware-Remote");
+        assert!(c.contains("Get-Service -Name 'DataSoftware-Remote'"));
+        assert!(c.contains("WaitForStatus('Stopped','00:01:00')"), "must be bounded");
+        assert!(!c.contains("STOPPED"), "sc output is localised");
+        assert!(!c.contains("timeout "), "timeout needs a console");
+    }
 
     #[test]
     fn update_urls_point_at_the_datasoftware_fork() {

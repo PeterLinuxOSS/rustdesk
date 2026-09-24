@@ -3396,11 +3396,22 @@ reg add {subkey} /f /v EstimatedSize /t REG_DWORD /d {size}
     // while I cannot find them by `tasklist` or the methods above.
     // There's should be 4 processes running: service, server, tray and main window.
     // But only 2 processes are shown in the tasklist.
+    // >>> DataSoftware: let the service actually exit before XCOPY runs <<<
+    // XCOPY below uses /C and silently skips files it cannot open, and a
+    // service that is still stopping holds librustdesk.dll. See
+    // datasoftware::wait_for_service_stop_cmd.
+    let wait_stopped_cmd = if is_service_running {
+        crate::datasoftware::wait_for_service_stop_cmd(&app_name)
+    } else {
+        String::new()
+    };
+    // <<< DataSoftware
     let cmds = format!(
         "
 chcp 65001
 sc stop {app_name}
 taskkill /F /IM {app_name}.exe{filter}
+{wait_stopped_cmd}
 {reg_cmd}
 {copy_exe}
 {rename_exe}
