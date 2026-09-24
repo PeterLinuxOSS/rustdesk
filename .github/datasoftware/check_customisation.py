@@ -439,9 +439,18 @@ else:
     check("src/platform/windows.rs readable", False, "file missing")
 
 if ds is not None:
+    # Judge the function body only: the unit test that pins this string
+    # contains it too, so a plain substring search would still pass after
+    # the function itself lost its timeout.
+    wait_fn = re.search(
+        r"pub fn wait_for_service_stop_cmd\(service: &str\) -> String \{(.*?)\n\}",
+        ds.replace("\r\n", "\n"),
+        re.S,
+    )
+    wait_body = wait_fn.group(1) if wait_fn else ""
     check(
         "the service wait is bounded and ignores localised output",
-        "WaitForStatus('Stopped','00:01:00')" in ds and "fn wait_for_service_stop_cmd" in ds,
+        "WaitForStatus('Stopped','00:01:00')" in wait_body and "STOPPED" not in wait_body,
         "an unbounded wait can hang an update; parsing sc output breaks on "
         "Czech and Slovak Windows",
     )
