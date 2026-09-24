@@ -441,6 +441,22 @@ sc.exe failure DataSoftware-Remote reset= 86400 actions= restart/60000/restart/6
 Do not reach for `ServicesPipeTimeout` instead - it is machine-wide, needs a
 reboot, and treats the symptom.
 
+**Before merging an upstream release that contains rustdesk#15634** (hardened
+installer scripts), deal with the wait above - otherwise it stops working with
+no error at all. That change runs the update script with `PATH` restricted to
+System32, where a bare `powershell` does not resolve; the batch then skips the
+wait and carries on as if it were not there. It only works today because 1.4.9
+inherits the machine `PATH`, which contains `WindowsPowerShell1.0`.
+
+Check whether rustdesk#16335 has been merged. It fixes the same race upstream
+with `tasklist` and `find` only, waiting for the processes rather than the
+service state. If it has, drop `wait_for_service_stop_cmd` and its hook in
+favour of it; if not, port that version. When porting before the merge, note
+that 1.4.9 writes the update script with LF line endings, and `goto` labels are
+unreliable in LF-only batch files - upstream's version relies on the CRLF that
+#15634 introduces. `check_customisation.py` will not notice any of this: it
+only reads the text of our function.
+
 ### Recovering a device the server refuses to register
 
 The client's key pair lives in `%APPDATA%\<app name>\config\<app name>.toml`.
