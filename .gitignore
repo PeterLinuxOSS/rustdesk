@@ -56,6 +56,8 @@ vcpkg_installed
 flutter/lib/generated_plugin_registrant.dart
 libsciter.dylib
 flutter/web/
+# libdrmtap is cloned at build time by build.py (not a submodule)
+/third_party/libdrmtap/
 # >>> DataSoftware custom client >>>
 # The repository-wide "*png" rule above would silently drop these two, and the
 # branded tray / in-app icon would never ship. res/*.png are already tracked so
