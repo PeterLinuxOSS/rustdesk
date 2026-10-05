@@ -205,9 +205,24 @@ if ds:
             "src/datasoftware.rs imports keys from %s" % crate,
         )
     else:
+        roots = [src_root]
+        # `base::config::keys` is a facade: it re-exports the keys hbb_common
+        # still owns (`pub use hbb_common::config::keys::*`), so a key reached
+        # through it is declared in the other crate. Follow the re-export, or
+        # OPTION_RELAY_SERVER and OPTION_DISABLE_CHANGE_PERMANENT_PASSWORD read
+        # as missing while the code compiles perfectly well.
+        for p in src_root.rglob("*.rs"):
+            for m in re.finditer(
+                r"pub\s+use\s+([a-z_][a-z0-9_]*)::config::keys::\*",
+                p.read_text(encoding="utf-8", errors="replace"),
+            ):
+                reexported = ROOT / "libs" / m.group(1) / "src"
+                if reexported.is_dir() and reexported not in roots:
+                    roots.append(reexported)
         blob = "\n".join(
             p.read_text(encoding="utf-8", errors="replace")
-            for p in src_root.rglob("*.rs")
+            for root in roots
+            for p in root.rglob("*.rs")
         )
         missing = [c for c in used if ("pub const %s:" % c) not in blob]
         elsewhere = {}

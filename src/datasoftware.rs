@@ -15,9 +15,10 @@
 //
 // See DATASOFTWARE_BUILD.md for the full maintenance procedure.
 
+use base::config::keys;
 use hbb_common::{
     bail,
-    config::{self, keys, Config, LocalConfig},
+    config::{self, Config, LocalConfig},
     log,
     tls::{get_cached_tls_type, upsert_tls_cache, TlsType},
     ResultType,
