@@ -238,7 +238,7 @@ async fn request_latest_release(
 /// Ask our GitHub repository for the latest published release and return a URL
 /// in the exact shape upstream's updater expects:
 ///
-///     https://github.com/<owner>/<repo>/releases/tag/<tag>
+/// `https://github.com/<owner>/<repo>/releases/tag/<tag>`
 ///
 /// `src/updater.rs` turns that into the download URL by replacing `tag` with
 /// `download` and appending `rustdesk-<tag>-<arch>.<exe|msi>`, so the release
