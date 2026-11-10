@@ -9,8 +9,8 @@ on:
   push:
     branches:
       - master
+      - ci/mcp-paste-text
     paths-ignore:
-      - ".github/**"
       - "docs/**"
       - "README.md"
       - "res/**"
