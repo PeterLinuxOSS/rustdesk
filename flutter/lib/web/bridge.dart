@@ -2031,6 +2031,13 @@ class RustdeskImpl {
           dynamic hint}) async =>
       'Not supported';
 
+  Future<String> sessionMcpRemoteAction(
+          {required UuidValue sessionId,
+          required String grantId,
+          required String action,
+          dynamic hint}) async =>
+      'Not supported';
+
   bool sessionMcpAuthenticate(
           {required UuidValue sessionId,
           required String grantId,

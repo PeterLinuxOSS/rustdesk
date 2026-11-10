@@ -329,6 +329,32 @@ pub fn set_clipboard(session_id: SessionID, grant_id: &str, value: &str) -> Stri
     String::new()
 }
 
+/// Toolbar actions an agent cannot express as ordinary keys. The OS password
+/// is the one saved for the peer, so the agent never sees it.
+pub fn remote_action(session_id: SessionID, grant_id: &str, action: &str) -> String {
+    let Some(session) = crate::flutter::sessions::get_session_by_session_id(&session_id) else {
+        return "The session was closed.".into();
+    };
+    let owner = session.ui_handler.mcp.owner.read().unwrap();
+    if !owner.accepts(Some(grant_id)) {
+        return "Control changed; this input was cancelled.".into();
+    }
+    match action {
+        "ctrl_alt_del" => session.ctrl_alt_del(),
+        "lock_screen" => session.lock_screen(),
+        "os_password" => {
+            let password = session.get_option("os-password".to_owned());
+            if password.is_empty() {
+                return "No OS password is saved for this peer. Ask the user to set it under OS password in the session toolbar."
+                    .into();
+            }
+            crate::client::_input_os_password(password, false, (*session).clone());
+        }
+        _ => return format!("Unknown action: {action}"),
+    }
+    String::new()
+}
+
 pub fn with_human_input(session_id: SessionID, send: impl FnOnce()) {
     let Some(session) = crate::flutter::sessions::get_session_by_session_id(&session_id) else {
         return;
@@ -846,6 +872,20 @@ mod tests {
             panic!("expected clipboard");
         };
         assert_eq!(msg.clipboard().content.as_ref(), b"Get-Date");
+        crate::flutter_ffi::session_close(id);
+    }
+
+    #[test]
+    fn remote_actions_need_the_grant_and_a_saved_os_password() {
+        let (id, connection) = session();
+        let mut receiver = capture(&connection);
+        set_agent_control(id, "grant".into());
+        assert!(!remote_action(id, "stale", "ctrl_alt_del").is_empty());
+        assert!(!remote_action(id, "grant", "os_password").is_empty());
+        assert!(!remote_action(id, "grant", "format_disk").is_empty());
+        assert!(receiver.try_recv().is_err());
+        assert!(remote_action(id, "grant", "ctrl_alt_del").is_empty());
+        assert_eq!(sent_keys(&mut receiver).len(), 1);
         crate::flutter_ffi::session_close(id);
     }
 
