@@ -123,6 +123,10 @@ class _FakeBackend implements McpBackend {
       calls.add('paste $sessionId $text $paste');
 
   @override
+  Future<void> remoteAction(String sessionId, String action) async =>
+      calls.add('action $sessionId $action');
+
+  @override
   Future<void> pressKey(String sessionId, String key, List<String> modifiers,
           {String action = 'press'}) async =>
       calls.add('key $sessionId $key ${modifiers.join('+')} $action');
@@ -216,6 +220,7 @@ void main() {
         'type_text',
         'paste_text',
         'press_key',
+        'remote_action',
         'disconnect',
       });
       for (final t in r['result']['tools']) {
@@ -535,6 +540,16 @@ void main() {
               {'session_id': 's', 'text': 'dir', 'paste': 'no'}));
       expect(bad['result']['isError'], true);
       expect(backend.calls, ['paste s Get-Date true', 'paste s dir false']);
+    });
+
+    test('remote_action sends known actions only', () async {
+      final r = await _rpc(dispatcher,
+          _call('remote_action', {'session_id': 's', 'action': 'os_password'}));
+      expect(r['result']['content'][0]['text'], 'ok');
+      final bad = await _rpc(dispatcher,
+          _call('remote_action', {'session_id': 's', 'action': 'reboot'}));
+      expect(bad['result']['isError'], true);
+      expect(backend.calls, ['action s os_password']);
     });
 
     test('backend failures become tool errors', () async {

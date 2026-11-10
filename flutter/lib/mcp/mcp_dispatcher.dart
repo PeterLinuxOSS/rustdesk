@@ -72,6 +72,9 @@ abstract class McpBackend {
   /// paste shortcut.
   Future<void> pasteText(String sessionId, String text, {bool paste = true});
 
+  /// [action] is one of [kMcpRemoteActions].
+  Future<void> remoteAction(String sessionId, String action);
+
   /// [key] uses RustDesk key names such as `VK_RETURN` or `VK_A`. [action] is
   /// one of [kMcpKeyActions].
   Future<void> pressKey(String sessionId, String key, List<String> modifiers,
@@ -669,6 +672,39 @@ class McpDispatcher {
         },
       ),
       _Tool(
+        'remote_action',
+        'Send a session toolbar action that ordinary keys cannot express. '
+            '`ctrl_alt_del` sends Ctrl+Alt+Del (the secure attention '
+            'sequence), e.g. to reach the Windows sign-in screen. '
+            '`lock_screen` locks the remote session. `os_password` types the '
+            'OS password the user saved for this peer and presses Enter; you '
+            'never see the password. It is typed into whatever has focus, so '
+            'take a screenshot first and use it only when the sign-in or '
+            'unlock password field is focused. Needs agent control.',
+        {
+          'session_id': _sessionIdProp,
+          'action': {
+            'type': 'string',
+            'enum': kMcpRemoteActions.toList(),
+          },
+          'display': {
+            'type': 'integer',
+            'description': 'Display captured by `screenshot_after_ms`, '
+                'default 0.',
+          },
+          'screenshot_after_ms': _screenshotAfterProp,
+        },
+        ['session_id', 'action'],
+        _input,
+        (a) async {
+          final action = _requireString(a, 'action');
+          if (!kMcpRemoteActions.contains(action)) {
+            throw McpToolException('Unknown action: $action');
+          }
+          return input(a, () => backend.remoteAction(sid(a), action));
+        },
+      ),
+      _Tool(
         'disconnect',
         'Close a remote desktop session. Needs agent control.',
         {'session_id': _sessionIdProp},
@@ -827,6 +863,12 @@ const Map<String, String> kMcpMouseButtons = {
 const Set<String> kMcpScrollDirections = {'up', 'down', 'left', 'right'};
 
 const Set<String> kMcpKeyActions = {'press', 'down', 'up'};
+
+const Set<String> kMcpRemoteActions = {
+  'ctrl_alt_del',
+  'lock_screen',
+  'os_password',
+};
 
 const Map<String, String> kMcpModifierKeyNames = {
   'ctrl': 'VK_CONTROL',
