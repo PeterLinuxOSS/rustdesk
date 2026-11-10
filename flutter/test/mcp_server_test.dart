@@ -118,6 +118,11 @@ class _FakeBackend implements McpBackend {
   }
 
   @override
+  Future<void> pasteText(String sessionId, String text,
+          {bool paste = true}) async =>
+      calls.add('paste $sessionId $text $paste');
+
+  @override
   Future<void> pressKey(String sessionId, String key, List<String> modifiers,
           {String action = 'press'}) async =>
       calls.add('key $sessionId $key ${modifiers.join('+')} $action');
@@ -209,6 +214,7 @@ void main() {
         'mouse',
         'scroll',
         'type_text',
+        'paste_text',
         'press_key',
         'disconnect',
       });
@@ -512,6 +518,23 @@ void main() {
           }));
       expect(slow['result']['isError'], true);
       expect(slow['result']['content'][0]['text'], contains('60 seconds'));
+    });
+
+    test('paste_text pastes by default and can only set the clipboard',
+        () async {
+      final r = await _rpc(dispatcher,
+          _call('paste_text', {'session_id': 's', 'text': 'Get-Date'}));
+      expect(r['result']['content'][0]['text'], 'ok');
+      await _rpc(
+          dispatcher,
+          _call('paste_text',
+              {'session_id': 's', 'text': 'dir', 'paste': false}));
+      final bad = await _rpc(
+          dispatcher,
+          _call('paste_text',
+              {'session_id': 's', 'text': 'dir', 'paste': 'no'}));
+      expect(bad['result']['isError'], true);
+      expect(backend.calls, ['paste s Get-Date true', 'paste s dir false']);
     });
 
     test('backend failures become tool errors', () async {

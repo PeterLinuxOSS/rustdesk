@@ -68,6 +68,10 @@ abstract class McpBackend {
 
   Future<void> typeText(String sessionId, String text, {int delayMs = 0});
 
+  /// Puts [text] on the remote clipboard and, with [paste], presses the
+  /// paste shortcut.
+  Future<void> pasteText(String sessionId, String text, {bool paste = true});
+
   /// [key] uses RustDesk key names such as `VK_RETURN` or `VK_A`. [action] is
   /// one of [kMcpKeyActions].
   Future<void> pressKey(String sessionId, String key, List<String> modifiers,
@@ -560,6 +564,44 @@ class McpDispatcher {
           }
           return input(
               a, () => backend.typeText(sid(a), value, delayMs: delay));
+        },
+      ),
+      _Tool(
+        'paste_text',
+        'Put text on the remote clipboard and paste it with Ctrl+V (Command+V '
+            'on macOS). Use it where `type_text` arrives empty, e.g. Windows '
+            'PowerShell 5.1 with PSReadLine, and for long text. It replaces '
+            'the remote user\'s clipboard. Pasted line breaks are not pressed '
+            'as Enter; press VK_RETURN afterwards to run a command. Where '
+            'Ctrl+V does not paste (Linux terminals, a legacy console), set '
+            '`paste` false and paste with the app\'s own shortcut or a right '
+            'click. Fails if clipboard sharing is off for the session. Needs '
+            'agent control.',
+        {
+          'session_id': _sessionIdProp,
+          'text': {'type': 'string'},
+          'paste': {
+            'type': 'boolean',
+            'description': 'Press the paste shortcut, default true. False only '
+                'sets the clipboard.',
+          },
+          'display': {
+            'type': 'integer',
+            'description': 'Display captured by `screenshot_after_ms`, '
+                'default 0.',
+          },
+          'screenshot_after_ms': _screenshotAfterProp,
+        },
+        ['session_id', 'text'],
+        _input,
+        (a) async {
+          final value = _requireString(a, 'text');
+          final paste = a['paste'] ?? true;
+          if (paste is! bool) {
+            throw McpToolException('Missing or invalid argument: paste');
+          }
+          return input(
+              a, () => backend.pasteText(sid(a), value, paste: paste));
         },
       ),
       _Tool(
