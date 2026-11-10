@@ -401,11 +401,31 @@ jobs:
           path: "./rustdesk"
 
       - name: Upload unsigned
-        if: env.UPLOAD_ARTIFACT == 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: rustdesk-unsigned-windows-${{ matrix.job.arch }}
           path: rustdesk
+
+      - name: Build and upload a test self-extracted executable
+        if: env.UPLOAD_ARTIFACT != 'true'
+        continue-on-error: true
+        shell: bash
+        run: |
+          sed -i '/dpiAware/d' res/manifest.xml
+          pushd ./libs/portable
+          pip3 install -r requirements.txt
+          python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
+          popd
+          mkdir -p ./TestOutput
+          mv ./target/release/rustdesk-portable-packer.exe ./TestOutput/rustdesk-paste-text-test-${{ matrix.job.arch }}.exe
+
+      - name: Upload the test self-extracted executable
+        if: env.UPLOAD_ARTIFACT != 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rustdesk-paste-text-test-exe-${{ matrix.job.arch }}
+          path: ./TestOutput/*.exe
 
       - name: Sign rustdesk files
         if: env.UPLOAD_ARTIFACT == 'true' && env.SIGN_BASE_URL != '-2'
